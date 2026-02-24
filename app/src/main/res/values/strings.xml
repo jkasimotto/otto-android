@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Otto Launcher</string>
+    <string name="search_hint">Search apps</string>
+    <string name="empty_results">No apps found</string>
+    <string name="launch_error">Unable to launch %1$s</string>
+</resources>

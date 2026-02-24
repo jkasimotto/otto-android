@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.OttoLauncher" parent="Theme.Material3.Dark" />
+</resources>
