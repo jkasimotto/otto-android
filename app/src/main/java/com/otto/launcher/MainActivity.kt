@@ -58,6 +58,7 @@ import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
@@ -404,6 +405,7 @@ private fun LauncherScreen(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun AppRow(
     appInfo: AppInfo,
@@ -559,6 +561,9 @@ private fun shouldDisplayApp(packageManager: PackageManager, appInfo: AppInfo): 
     if (BLOCKED_PACKAGES.any { normalizedPackage.startsWith(it) }) {
         return false
     }
+    if (normalizedPackage in BLOCKED_APPS) {
+        return false
+    }
 
     return runCatching {
         val app = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -587,6 +592,11 @@ private fun shouldDisplayApp(packageManager: PackageManager, appInfo: AppInfo): 
 }
 
 private fun Context.launchApp(appInfo: AppInfo) {
+    if (appInfo.packageName.lowercase(Locale.getDefault()) in BLOCKED_APPS) {
+        Toast.makeText(this, "${appInfo.label} is blocked.", Toast.LENGTH_SHORT).show()
+        return
+    }
+
     val launchIntent = Intent(Intent.ACTION_MAIN).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)
         setClassName(appInfo.packageName, appInfo.activityName)
@@ -938,6 +948,15 @@ private val BLOCKED_PACKAGES = setOf(
     "com.sec.android.app.desktoplauncher",
     "com.sec.android.app.dexonpc",
     "com.samsung.desktopsystemui"
+)
+
+/** Apps intentionally blocked from appearing or launching. */
+private val BLOCKED_APPS = setOf(
+    "com.reddit.frontpage",
+    "com.zhiliaoapp.musically",     // TikTok
+    "com.ss.android.ugc.trill",     // TikTok (regional variant)
+    "com.linkedin.android",
+    "com.instagram.android",
 )
 
 private val ALLOWED_SYSTEM_PACKAGES = setOf(

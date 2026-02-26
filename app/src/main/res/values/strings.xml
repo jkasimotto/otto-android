@@ -3,4 +3,5 @@
     <string name="search_hint">Search apps</string>
     <string name="empty_results">No apps found</string>
     <string name="launch_error">Unable to launch %1$s</string>
+    <string name="app_info_error">Unable to open info for %1$s</string>
 </resources>
