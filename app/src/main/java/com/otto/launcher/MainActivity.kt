@@ -1,7 +1,9 @@
 package com.otto.launcher
 
 import android.Manifest
+import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -47,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +73,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.otto.launcher.ui.theme.OttoLauncherTheme
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -147,6 +151,9 @@ class MainActivity : ComponentActivity() {
         packageChangeReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 refreshLauncherApps()
+                lifecycleScope.launch(Dispatchers.IO) {
+                    enforceAppBlocking(this@MainActivity)
+                }
             }
         }.also { receiver ->
             registerReceiver(receiver, filter)
@@ -196,6 +203,10 @@ private fun LauncherScreen(
             voiceHudVisible = false
             isVoiceMode = false
         }
+    }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { enforceAppBlocking(context) }
     }
 
     DisposableEffect(voiceManager) {
@@ -941,6 +952,15 @@ private object OttoConfig {
 
 private object HttpClientProvider {
     val client: OkHttpClient by lazy { OkHttpClient() }
+}
+
+/** Suspend blocked apps via Device Owner API. Requires one-time adb setup:
+ *  adb shell dpm set-device-owner com.otto.launcher/.OttoDeviceAdminReceiver */
+private fun enforceAppBlocking(context: Context) {
+    val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+    val adminComponent = ComponentName(context, OttoDeviceAdminReceiver::class.java)
+    if (!dpm.isDeviceOwnerApp(context.packageName)) return
+    dpm.setPackagesSuspended(adminComponent, BLOCKED_APPS.toTypedArray(), true)
 }
 
 private val BLOCKED_PACKAGES = setOf(
