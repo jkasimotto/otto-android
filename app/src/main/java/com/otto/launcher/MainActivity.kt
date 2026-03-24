@@ -1,12 +1,8 @@
 package com.otto.launcher
 
 import android.Manifest
-import android.app.admin.DevicePolicyManager
-import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
@@ -49,7 +45,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,8 +67,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.otto.launcher.ui.theme.OttoLauncherTheme
 import androidx.lifecycle.lifecycleScope
+import com.otto.launcher.ui.theme.OttoLauncherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -96,7 +91,6 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private var launcherApps by mutableStateOf<List<AppInfo>>(emptyList())
-    private var packageChangeReceiver: BroadcastReceiver? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,8 +102,6 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.statusBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-
-        registerPackageChangeReceiver()
 
         setContent {
             OttoLauncherTheme {
@@ -129,42 +121,16 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshLauncherApps()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        unregisterPackageChangeReceiver()
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                OttoPolicyController.applyPolicies(this@MainActivity)
+            }
+            OttoPolicyController.maybeEnterLockTask(this@MainActivity)
+        }
     }
 
     private fun refreshLauncherApps() {
         launcherApps = loadLauncherApps(packageManager)
-    }
-
-    private fun registerPackageChangeReceiver() {
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_PACKAGE_ADDED)
-            addAction(Intent.ACTION_PACKAGE_REMOVED)
-            addAction(Intent.ACTION_PACKAGE_CHANGED)
-            addAction(Intent.ACTION_PACKAGE_REPLACED)
-            addDataScheme("package")
-        }
-        packageChangeReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                refreshLauncherApps()
-                lifecycleScope.launch(Dispatchers.IO) {
-                    enforceAppBlocking(this@MainActivity)
-                }
-            }
-        }.also { receiver ->
-            registerReceiver(receiver, filter)
-        }
-    }
-
-    private fun unregisterPackageChangeReceiver() {
-        packageChangeReceiver?.let { receiver ->
-            runCatching { unregisterReceiver(receiver) }
-        }
-        packageChangeReceiver = null
     }
 }
 
@@ -203,10 +169,6 @@ private fun LauncherScreen(
             voiceHudVisible = false
             isVoiceMode = false
         }
-    }
-
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { enforceAppBlocking(context) }
     }
 
     DisposableEffect(voiceManager) {
@@ -525,7 +487,7 @@ data class AppInfo(
     val activityName: String
 )
 
-private fun loadLauncherApps(packageManager: PackageManager): List<AppInfo> {
+internal fun loadLauncherApps(packageManager: PackageManager): List<AppInfo> {
     val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)
     }
@@ -569,10 +531,7 @@ private fun shouldDisplayApp(packageManager: PackageManager, appInfo: AppInfo): 
     }
 
     val normalizedPackage = appInfo.packageName.lowercase(Locale.getDefault())
-    if (BLOCKED_PACKAGES.any { normalizedPackage.startsWith(it) }) {
-        return false
-    }
-    if (normalizedPackage in BLOCKED_APPS) {
+    if (OttoPolicyController.shouldHideFromLauncher(normalizedPackage)) {
         return false
     }
 
@@ -603,7 +562,7 @@ private fun shouldDisplayApp(packageManager: PackageManager, appInfo: AppInfo): 
 }
 
 private fun Context.launchApp(appInfo: AppInfo) {
-    if (appInfo.packageName.lowercase(Locale.getDefault()) in BLOCKED_APPS) {
+    if (OttoPolicyController.isBlockedApp(appInfo.packageName)) {
         Toast.makeText(this, "${appInfo.label} is blocked.", Toast.LENGTH_SHORT).show()
         return
     }
@@ -954,32 +913,7 @@ private object HttpClientProvider {
     val client: OkHttpClient by lazy { OkHttpClient() }
 }
 
-/** Suspend blocked apps via Device Owner API. Requires one-time adb setup:
- *  adb shell dpm set-device-owner com.otto.launcher/.OttoDeviceAdminReceiver */
-private fun enforceAppBlocking(context: Context) {
-    val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-    val adminComponent = ComponentName(context, OttoDeviceAdminReceiver::class.java)
-    if (!dpm.isDeviceOwnerApp(context.packageName)) return
-    dpm.setPackagesSuspended(adminComponent, BLOCKED_APPS.toTypedArray(), true)
-}
-
-private val BLOCKED_PACKAGES = setOf(
-    "com.android.server",
-    "com.sec.android.app.desktoplauncher",
-    "com.sec.android.app.dexonpc",
-    "com.samsung.desktopsystemui"
-)
-
-/** Apps intentionally blocked from appearing or launching. */
-private val BLOCKED_APPS = setOf(
-    "com.reddit.frontpage",
-    "com.zhiliaoapp.musically",     // TikTok
-    "com.ss.android.ugc.trill",     // TikTok (regional variant)
-    "com.linkedin.android",
-    "com.instagram.android",
-)
-
-private val ALLOWED_SYSTEM_PACKAGES = setOf(
+internal val ALLOWED_SYSTEM_PACKAGES = setOf(
     "com.google.android.apps.maps",
     "com.google.android.dialer",
     "com.android.dialer",
