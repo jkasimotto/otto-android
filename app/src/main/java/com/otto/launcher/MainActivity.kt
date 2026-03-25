@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.IO) {
                 OttoPolicyController.applyPolicies(this@MainActivity)
             }
+            OttoPolicyController.startWebsiteVpnIfNeeded(this@MainActivity)
             OttoPolicyController.maybeEnterLockTask(this@MainActivity)
         }
     }

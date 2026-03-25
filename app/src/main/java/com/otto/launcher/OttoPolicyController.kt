@@ -8,8 +8,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.pm.PackageManager.NameNotFoundException
+import android.net.VpnService
 import android.os.Build
 import android.os.UserManager
+import androidx.core.content.ContextCompat
 import java.time.DayOfWeek
 import java.time.LocalDateTime
 
@@ -120,6 +123,7 @@ object OttoPolicyController {
         applyPersistentHome(dpm, admin, appContext)
         applyLockTaskPackages(dpm, admin, appContext)
         applyLockTaskFeatures(dpm, admin)
+        applyAlwaysOnVpnPolicy(dpm, admin, appContext)
 
         prefs.edit()
             .putStringSet(KEY_LAST_HARD_BLOCKED_APPS, currentBlockedApps)
@@ -171,6 +175,17 @@ object OttoPolicyController {
         if (activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) return
 
         runCatching { activity.startLockTask() }
+    }
+
+    fun startWebsiteVpnIfNeeded(context: Context) {
+        val appContext = context.applicationContext
+        if (VpnService.prepare(appContext) != null) return
+        runCatching {
+            ContextCompat.startForegroundService(
+                appContext,
+                Intent(appContext, OttoDnsVpnService::class.java)
+            )
+        }
     }
 
     private fun clearPackageState(
@@ -246,6 +261,18 @@ object OttoPolicyController {
             dpm.setLockTaskFeatures(admin, baseFlags or LOCK_TASK_FEATURE_QUICK_SETTINGS)
         }.getOrElse {
             dpm.setLockTaskFeatures(admin, baseFlags)
+        }
+    }
+
+    private fun applyAlwaysOnVpnPolicy(
+        dpm: DevicePolicyManager,
+        admin: ComponentName,
+        context: Context
+    ) {
+        try {
+            dpm.setAlwaysOnVpnPackage(admin, context.packageName, false)
+        } catch (_: NameNotFoundException) {
+        } catch (_: UnsupportedOperationException) {
         }
     }
 
