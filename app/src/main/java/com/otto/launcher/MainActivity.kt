@@ -41,8 +41,11 @@ import androidx.compose.material.icons.filled.MicNone
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -65,8 +68,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.otto.launcher.ui.theme.OttoLauncherTheme
 import kotlinx.coroutines.Dispatchers
@@ -98,10 +99,6 @@ class MainActivity : ComponentActivity() {
         val versionLabel = currentVersionName()
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.statusBars())
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
 
         setContent {
             OttoLauncherTheme {
@@ -156,6 +153,32 @@ private fun LauncherScreen(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var pendingPermissionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var isVoiceMode by rememberSaveable { mutableStateOf(false) }
+    var gatedLaunchApp by remember { mutableStateOf<AppInfo?>(null) }
+    var launchPassphrase by rememberSaveable { mutableStateOf("") }
+    var launchGateError by remember { mutableStateOf<String?>(null) }
+
+    fun attemptLaunch(app: AppInfo): Boolean {
+        return when {
+            OttoPolicyController.isBlockedApp(app.packageName) -> {
+                statusMessage = "${app.label} is blocked."
+                Toast.makeText(context, "${app.label} is blocked.", Toast.LENGTH_SHORT).show()
+                false
+            }
+
+            OttoPolicyController.requiresLaunchPassphrase(context, app.packageName) -> {
+                gatedLaunchApp = app
+                launchPassphrase = ""
+                launchGateError = null
+                statusMessage = OttoPolicyController.launchGatePrompt(app.packageName)
+                false
+            }
+
+            else -> {
+                context.launchApp(app)
+                true
+            }
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -197,8 +220,9 @@ private fun LauncherScreen(
             val result = voiceAgent.resolve(cleaned, apps)
             result
                 .onSuccess { app ->
-                    statusMessage = "Opening ${app.label}"
-                    context.launchApp(app)
+                    if (attemptLaunch(app)) {
+                        statusMessage = "Opening ${app.label}"
+                    }
                 }
                 .onFailure { error ->
                     statusMessage = error.message ?: "Couldn't pick an app."
@@ -285,7 +309,9 @@ private fun LauncherScreen(
                             when (tapCount) {
                                 1 -> if (!isVoiceMode) statusMessage = null
                                 2 -> {
-                                    val message = handleDoubleTap(context, apps)
+                                    val message = handleDoubleTap(apps) { app ->
+                                        attemptLaunch(app)
+                                    }
                                     statusMessage = message
                                     isVoiceMode = false
                                     voiceHudVisible = false
@@ -309,18 +335,25 @@ private fun LauncherScreen(
                 )
             }
     ) {
+        QuickActionRow(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .navigationBarsPadding(),
+            onOpenSettings = { context.openSystemSettings() }
+        )
+
         if (filteredApps.isNotEmpty()) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 96.dp),
+                    .padding(top = 40.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(bottom = 0.dp)
             ) {
                 items(filteredApps) { app ->
                     AppRow(
                         appInfo = app,
-                        onLaunch = { context.launchApp(it) },
+                        onLaunch = { attemptLaunch(it) },
                         onLongPress = { context.openAppInfo(it) }
                     )
                 }
@@ -357,6 +390,7 @@ private fun LauncherScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
+                    .padding(top = 36.dp)
             )
         }
 
@@ -375,6 +409,112 @@ private fun LauncherScreen(
                 }
             )
         }
+
+        gatedLaunchApp?.let { app ->
+            AlertDialog(
+                onDismissRequest = {
+                    gatedLaunchApp = null
+                    launchPassphrase = ""
+                    launchGateError = null
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val isValid = OttoPolicyController.verifyLaunchPassphrase(
+                                context = context,
+                                packageName = app.packageName,
+                                attemptedPassphrase = launchPassphrase
+                            )
+                            if (isValid) {
+                                gatedLaunchApp = null
+                                launchGateError = null
+                                launchPassphrase = ""
+                                context.launchApp(app)
+                                statusMessage = "Opening ${app.label}"
+                            } else {
+                                launchGateError = OttoPolicyController.launchGateFailureMessage(app.packageName)
+                            }
+                        }
+                    ) {
+                        Text("Open")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            gatedLaunchApp = null
+                            launchPassphrase = ""
+                            launchGateError = null
+                        }
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+                title = {
+                    Text("After-Hours Gate")
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            OttoPolicyController.launchGatePrompt(app.packageName)
+                                ?: "Enter the passphrase to continue."
+                        )
+                        OutlinedTextField(
+                            value = launchPassphrase,
+                            onValueChange = {
+                                launchPassphrase = it
+                                launchGateError = null
+                            },
+                            label = { Text("Passphrase") },
+                            singleLine = true
+                        )
+                        launchGateError?.let { error ->
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickActionRow(
+    modifier: Modifier = Modifier,
+    onOpenSettings: () -> Unit
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        QuickActionChip(
+            label = "Settings",
+            onClick = onOpenSettings
+        )
+    }
+}
+
+@Composable
+private fun QuickActionChip(
+    label: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+        tonalElevation = 3.dp,
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+        )
     }
 }
 
@@ -598,14 +738,31 @@ private fun Context.openAppInfo(appInfo: AppInfo) {
         }
 }
 
+private fun Context.openSystemSettings() {
+    val intent = Intent(Settings.ACTION_SETTINGS).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { startActivity(intent) }
+        .onFailure {
+            Toast.makeText(
+                this,
+                "Unable to open Settings.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+}
+
 private fun handleDoubleTap(
-    context: Context,
-    apps: List<AppInfo>
+    apps: List<AppInfo>,
+    onLaunch: (AppInfo) -> Boolean
 ): String {
     val target = findPreferredApp(apps)
     return if (target != null) {
-        context.launchApp(target)
-        "Opening ${target.label}"
+        if (onLaunch(target)) {
+            "Opening ${target.label}"
+        } else {
+            "Open ${target.label} from the gate prompt."
+        }
     } else {
         "\"$TRIPLE_TAP_APP_LABEL\" app not found."
     }
@@ -914,6 +1071,8 @@ private object HttpClientProvider {
 }
 
 internal val ALLOWED_SYSTEM_PACKAGES = setOf(
+    "com.android.settings",
+    "com.samsung.android.settings",
     "com.google.android.apps.maps",
     "com.google.android.dialer",
     "com.android.dialer",
@@ -923,7 +1082,7 @@ internal val ALLOWED_SYSTEM_PACKAGES = setOf(
     "com.samsung.android.contacts"
 )
 
-private val ALLOWED_SYSTEM_LABEL_KEYWORDS = listOf("maps", "phone", "dialer", "contacts")
+private val ALLOWED_SYSTEM_LABEL_KEYWORDS = listOf("settings", "maps", "phone", "dialer", "contacts")
 
 private const val TRIPLE_TAP_WINDOW_MS = 400L
 private const val TRIPLE_TAP_APP_LABEL = "Pad"
