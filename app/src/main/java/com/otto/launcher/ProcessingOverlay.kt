@@ -1,9 +1,10 @@
 package com.otto.launcher
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -37,6 +38,24 @@ import kotlin.random.Random
 @Composable
 fun ProcessingOverlay(
     active: Boolean,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = active,
+        enter = fadeIn(animationSpec = tween(durationMillis = 220)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 420)),
+        modifier = modifier.fillMaxSize()
+    ) {
+        ProcessingOverlayContent(
+            label = label,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+@Composable
+private fun ProcessingOverlayContent(
     label: String,
     modifier: Modifier = Modifier
 ) {
@@ -78,32 +97,27 @@ fun ProcessingOverlay(
         ),
         label = "scan-phase"
     )
-    val intensity = animateFloatAsState(
-        targetValue = if (active) 1f else 0f,
-        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
-        label = "processing-intensity"
-    )
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val center = Offset(size.width * 0.5f, size.height * 0.42f)
             val tau = (PI * 2).toFloat()
             val sweepY = size.height * (0.12f + 0.76f * scanPhase.value)
 
-            drawRect(color = Color.Black.copy(alpha = 0.06f + 0.18f * intensity.value))
+            drawRect(color = Color.Black.copy(alpha = 0.24f))
 
             val glowRadius = size.minDimension * (0.12f + 0.18f * pulsePhase.value)
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        OttoWhite.copy(alpha = 0.06f + 0.18f * intensity.value),
-                        OttoGraphite.copy(alpha = 0.03f + 0.07f * intensity.value),
+                        OttoWhite.copy(alpha = 0.24f),
+                        OttoGraphite.copy(alpha = 0.1f),
                         Color.Transparent
                     ),
                     center = center,
-                    radius = glowRadius * (1.2f + intensity.value)
+                    radius = glowRadius * 2.2f
                 ),
-                radius = glowRadius * (1.2f + intensity.value),
+                radius = glowRadius * 2.2f,
                 center = center
             )
 
@@ -113,20 +127,20 @@ fun ProcessingOverlay(
                 val driftY = sin(angle * 1.37f) * (8f + 18f * particle.pull)
                 val baseX = size.width * particle.x + driftX
                 val baseY = size.height * particle.y + driftY
-                val pull = intensity.value * (0.18f + 0.56f * particle.pull)
+                val pull = 0.18f + 0.56f * particle.pull
                 val x = lerp(baseX, center.x, pull)
                 val y = lerp(baseY, center.y, pull * 0.92f)
 
                 drawCircle(
                     color = OttoWhite.copy(
-                        alpha = particle.alpha * (0.7f + 1.2f * intensity.value)
+                        alpha = particle.alpha * 1.9f
                     ),
-                    radius = particle.radius * (1f + 1.6f * intensity.value * particle.pull),
+                    radius = particle.radius * (1f + 1.6f * particle.pull),
                     center = Offset(x, y)
                 )
             }
 
-            val lineAlpha = 0.03f + 0.08f * intensity.value
+            val lineAlpha = 0.11f
             drawLine(
                 color = OttoWhite.copy(alpha = lineAlpha),
                 start = Offset(0f, sweepY),
@@ -137,28 +151,26 @@ fun ProcessingOverlay(
             repeat(12) { index ->
                 val y = size.height * (index / 12f)
                 drawLine(
-                    color = OttoSilver.copy(alpha = 0.012f + 0.02f * intensity.value),
+                    color = OttoSilver.copy(alpha = 0.032f),
                     start = Offset(0f, y),
                     end = Offset(size.width, y),
                     strokeWidth = 1f
                 )
             }
 
-            if (intensity.value > 0.01f) {
-                val ringRadius = size.minDimension * (0.08f + 0.22f * pulsePhase.value)
-                drawCircle(
-                    color = OttoWhite.copy(alpha = 0.08f + 0.2f * intensity.value),
-                    radius = ringRadius,
-                    center = center,
-                    style = Stroke(width = 1.5f)
-                )
-                drawCircle(
-                    color = OttoSilver.copy(alpha = 0.06f + 0.12f * intensity.value),
-                    radius = ringRadius * 1.38f,
-                    center = center,
-                    style = Stroke(width = 1f)
-                )
-            }
+            val ringRadius = size.minDimension * (0.08f + 0.22f * pulsePhase.value)
+            drawCircle(
+                color = OttoWhite.copy(alpha = 0.28f),
+                radius = ringRadius,
+                center = center,
+                style = Stroke(width = 1.5f)
+            )
+            drawCircle(
+                color = OttoSilver.copy(alpha = 0.18f),
+                radius = ringRadius * 1.38f,
+                center = center,
+                style = Stroke(width = 1f)
+            )
         }
 
         Column(
@@ -169,15 +181,15 @@ fun ProcessingOverlay(
         ) {
             Text(
                 text = label,
-                color = OttoWhite.copy(alpha = 0.84f * intensity.value),
+                color = OttoWhite.copy(alpha = 0.84f),
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 7.sp,
                 textAlign = TextAlign.Center
             )
             Text(
-                text = if (active) "Signal path engaged" else "Standby",
-                color = OttoSilver.copy(alpha = 0.52f * intensity.value),
+                text = "Signal path engaged",
+                color = OttoSilver.copy(alpha = 0.52f),
                 fontSize = 12.sp,
                 letterSpacing = 2.sp,
                 textAlign = TextAlign.Center,

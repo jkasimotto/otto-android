@@ -153,18 +153,18 @@ private fun LauncherScreen(
     var lastTapTimestamp by remember { mutableStateOf(0L) }
 
     var query by rememberSaveable { mutableStateOf("") }
-    var voiceHudVisible by rememberSaveable { mutableStateOf(false) }
-    var isRecording by rememberSaveable { mutableStateOf(false) }
-    var isTranscribing by rememberSaveable { mutableStateOf(false) }
+    var voiceHudVisible by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var isTranscribing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var pendingPermissionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var isVoiceMode by rememberSaveable { mutableStateOf(false) }
+    var isVoiceMode by remember { mutableStateOf(false) }
     var gatedLaunchApp by remember { mutableStateOf<AppInfo?>(null) }
     var launchPassphrase by rememberSaveable { mutableStateOf("") }
     var launchGateError by remember { mutableStateOf<String?>(null) }
     var isUpdating by remember { mutableStateOf(false) }
-    var manualProcessingActive by rememberSaveable { mutableStateOf(false) }
-    var manualProcessingLabel by rememberSaveable { mutableStateOf(PROCESSING_LABELS.first()) }
+    var manualProcessingActive by remember { mutableStateOf(false) }
+    var manualProcessingLabel by remember { mutableStateOf(PROCESSING_LABELS.first()) }
     var manualProcessingNonce by remember { mutableStateOf(0) }
 
     fun triggerProcessingOverlay(label: String = PROCESSING_LABELS[manualProcessingNonce % PROCESSING_LABELS.size]) {
@@ -409,7 +409,10 @@ private fun LauncherScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 0.dp)
                 ) {
-                    items(filteredApps) { app ->
+                    items(
+                        items = filteredApps,
+                        key = { it.activityName }
+                    ) { app ->
                         AppRow(
                             appInfo = app,
                             onLaunch = { attemptLaunch(it) },
