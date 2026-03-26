@@ -228,7 +228,15 @@ class OttoDnsVpnService : VpnService() {
     }
 
     private fun upstreamDnsServers(): List<InetAddress> {
-        val preferredNetwork = preferredTransportNetwork()
+        val preferredNetwork = runCatching { preferredTransportNetwork() }
+            .onFailure { error ->
+                OttoDiagnostics.warn(
+                    applicationContext,
+                    "DnsVpn",
+                    "Unable to inspect active transport network; falling back to public DNS (${error.javaClass.simpleName})."
+                )
+            }
+            .getOrNull()
         val now = SystemClock.elapsedRealtime()
         val cached = cachedUpstreamServers
         if (cached != null &&
@@ -239,7 +247,8 @@ class OttoDnsVpnService : VpnService() {
         }
 
         val systemServers = preferredNetwork?.let { network ->
-            connectivityManager.getLinkProperties(network)?.dnsServers.orEmpty()
+            runCatching { connectivityManager.getLinkProperties(network)?.dnsServers.orEmpty() }
+                .getOrDefault(emptyList())
         }.orEmpty()
 
         val resolvedServers = if (systemServers.isNotEmpty()) {
@@ -285,7 +294,8 @@ class OttoDnsVpnService : VpnService() {
 
     private fun describeNetwork(network: Network?): String {
         if (network == null) return "none"
-        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        val capabilities = runCatching { connectivityManager.getNetworkCapabilities(network) }
+            .getOrNull()
         val parts = mutableListOf<String>()
         parts += "id=$network"
         if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) parts += "wifi"
