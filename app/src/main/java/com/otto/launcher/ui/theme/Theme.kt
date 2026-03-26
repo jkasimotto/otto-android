@@ -5,14 +5,14 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
 private val DarkColors = darkColorScheme(
-    primary = OttoLilac,
-    onPrimary = OttoCharcoal,
-    background = OttoCharcoal,
-    onBackground = OttoLilac,
-    surface = OttoCharcoal,
-    onSurface = OttoLilac,
+    primary = OttoWhite,
+    onPrimary = OttoBlack,
+    background = OttoBlack,
+    onBackground = OttoWhite,
+    surface = OttoInk,
+    onSurface = OttoWhite,
     surfaceVariant = OttoGraphite,
-    onSurfaceVariant = OttoLilac
+    onSurfaceVariant = OttoSilver
 )
 
 @Composable

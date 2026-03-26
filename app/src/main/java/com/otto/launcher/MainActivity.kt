@@ -51,6 +51,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -162,6 +163,32 @@ private fun LauncherScreen(
     var launchPassphrase by rememberSaveable { mutableStateOf("") }
     var launchGateError by remember { mutableStateOf<String?>(null) }
     var isUpdating by remember { mutableStateOf(false) }
+    var manualProcessingActive by rememberSaveable { mutableStateOf(false) }
+    var manualProcessingLabel by rememberSaveable { mutableStateOf(PROCESSING_LABELS.first()) }
+    var manualProcessingNonce by remember { mutableStateOf(0) }
+
+    fun triggerProcessingOverlay(label: String = PROCESSING_LABELS[manualProcessingNonce % PROCESSING_LABELS.size]) {
+        manualProcessingLabel = label
+        manualProcessingActive = true
+        manualProcessingNonce += 1
+    }
+
+    LaunchedEffect(manualProcessingActive, manualProcessingNonce) {
+        if (!manualProcessingActive) return@LaunchedEffect
+        val activeNonce = manualProcessingNonce
+        delay(PROCESSING_OVERLAY_DURATION_MS)
+        if (manualProcessingNonce == activeNonce) {
+            manualProcessingActive = false
+        }
+    }
+
+    val processingActive = manualProcessingActive || isUpdating || isTranscribing || isRecording
+    val processingLabel = when {
+        isUpdating -> "SYNCING"
+        isTranscribing -> "TRANSCRIBING"
+        isRecording -> "LISTENING"
+        else -> manualProcessingLabel
+    }
 
     fun attemptLaunch(app: AppInfo): Boolean {
         return when {
@@ -222,6 +249,7 @@ private fun LauncherScreen(
         isVoiceMode = true
         query = cleaned
         statusMessage = "Working on \"$cleaned\"..."
+        triggerProcessingOverlay("PROCESSING")
         scope.launch {
             val result = voiceAgent.resolve(cleaned, apps)
             result
@@ -295,212 +323,231 @@ private fun LauncherScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 32.dp)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = {
-                        val now = SystemClock.elapsedRealtime()
-                        if (now - lastTapTimestamp > TRIPLE_TAP_WINDOW_MS) {
-                            tapCount = 0
-                        }
-                        lastTapTimestamp = now
-                        tapCount += 1
+    Box(modifier = Modifier.fillMaxSize()) {
+        ProcessingOverlay(
+            active = processingActive,
+            label = processingLabel,
+            modifier = Modifier.fillMaxSize()
+        )
 
-                        tapTimeoutJob?.cancel()
-                        tapTimeoutJob = scope.launch {
-                            delay(TRIPLE_TAP_WINDOW_MS)
-                            when (tapCount) {
-                                1 -> if (!isVoiceMode) statusMessage = null
-                                2 -> {
-                                    val message = handleDoubleTap(apps) { app ->
-                                        attemptLaunch(app)
-                                    }
-                                    statusMessage = message
-                                    isVoiceMode = false
-                                    voiceHudVisible = false
-                                    isRecording = false
-                                    isTranscribing = false
-                                    query = ""
-                                }
-                                else -> {
-                                    if (!isRecording && !isTranscribing) {
-                                        isVoiceMode = true
-                                        voiceHudVisible = true
-                                        statusMessage = "Voice search ready."
-                                        startVoiceRecording()
-                                    }
-                                }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 32.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - lastTapTimestamp > TRIPLE_TAP_WINDOW_MS) {
+                                tapCount = 0
                             }
-                            tapCount = 0
-                            tapTimeoutJob = null
+                            lastTapTimestamp = now
+                            tapCount += 1
+
+                            tapTimeoutJob?.cancel()
+                            tapTimeoutJob = scope.launch {
+                                delay(TRIPLE_TAP_WINDOW_MS)
+                                when (tapCount) {
+                                    1 -> if (!isVoiceMode) statusMessage = null
+                                    2 -> {
+                                        val message = handleDoubleTap(apps) { app ->
+                                            attemptLaunch(app)
+                                        }
+                                        statusMessage = message
+                                        isVoiceMode = false
+                                        voiceHudVisible = false
+                                        isRecording = false
+                                        isTranscribing = false
+                                        query = ""
+                                    }
+                                    else -> {
+                                        if (!isRecording && !isTranscribing) {
+                                            isVoiceMode = true
+                                            voiceHudVisible = true
+                                            statusMessage = "Voice search ready."
+                                            startVoiceRecording()
+                                        }
+                                    }
+                                }
+                                tapCount = 0
+                                tapTimeoutJob = null
+                            }
+                        }
+                    )
+                }
+        ) {
+            QuickActionRow(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .navigationBarsPadding(),
+                onOpenSettings = { context.openSystemSettings() },
+                onUpdate = {
+                    if (isUpdating) return@QuickActionRow
+                    isUpdating = true
+                    statusMessage = "Checking for Otto updates..."
+                    scope.launch {
+                        val result = OttoUpdater.downloadLatestRelease(context)
+                        isUpdating = false
+                        result
+                            .onSuccess { apkFile ->
+                                triggerProcessingOverlay("INSTALLING")
+                                statusMessage = "Installing update..."
+                                context.installApk(apkFile)
+                            }
+                            .onFailure { error ->
+                                statusMessage = error.message ?: "Update failed."
+                            }
+                    }
+                }
+            )
+
+            if (filteredApps.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 40.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 0.dp)
+                ) {
+                    items(filteredApps) { app ->
+                        AppRow(
+                            appInfo = app,
+                            onLaunch = { attemptLaunch(it) },
+                            onLongPress = { context.openAppInfo(it) }
+                        )
+                    }
+                }
+            }
+
+            MinimalSearchField(
+                query = query,
+                onQueryChange = {
+                    query = it
+                    if (it.isNotEmpty()) {
+                        statusMessage = null
+                    }
+                    isVoiceMode = false
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
+            )
+
+            Text(
+                text = versionLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onLongPress = {
+                            triggerProcessingOverlay()
+                            statusMessage = "Processing field engaged."
+                            }
+                        )
+                    }
+                    .padding(vertical = 6.dp)
+            )
+
+            statusMessage?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 36.dp)
+                )
+            }
+
+            if (voiceHudVisible || isRecording || isTranscribing) {
+                VoiceControlChip(
+                    isRecording = isRecording,
+                    isTranscribing = isTranscribing,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .imePadding(),
+                    onTap = {
+                        if (isRecording) {
+                            stopRecordingAndTranscribe()
                         }
                     }
                 )
             }
-    ) {
-        QuickActionRow(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .navigationBarsPadding(),
-            onOpenSettings = { context.openSystemSettings() },
-            onUpdate = {
-                if (isUpdating) return@QuickActionRow
-                isUpdating = true
-                statusMessage = "Checking for Otto updates..."
-                scope.launch {
-                    val result = OttoUpdater.downloadLatestRelease(context)
-                    isUpdating = false
-                    result
-                        .onSuccess { apkFile ->
-                            statusMessage = "Installing update..."
-                            context.installApk(apkFile)
+
+            gatedLaunchApp?.let { app ->
+                AlertDialog(
+                    onDismissRequest = {
+                        gatedLaunchApp = null
+                        launchPassphrase = ""
+                        launchGateError = null
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val isValid = OttoPolicyController.verifyLaunchPassphrase(
+                                    context = context,
+                                    packageName = app.packageName,
+                                    attemptedPassphrase = launchPassphrase
+                                )
+                                if (isValid) {
+                                    gatedLaunchApp = null
+                                    launchGateError = null
+                                    launchPassphrase = ""
+                                    context.launchApp(app)
+                                    statusMessage = "Opening ${app.label}"
+                                } else {
+                                    launchGateError = OttoPolicyController.launchGateFailureMessage(app.packageName)
+                                }
+                            }
+                        ) {
+                            Text("Open")
                         }
-                        .onFailure { error ->
-                            statusMessage = error.message ?: "Update failed."
-                        }
-                }
-            }
-        )
-
-        if (filteredApps.isNotEmpty()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 40.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 0.dp)
-            ) {
-                items(filteredApps) { app ->
-                    AppRow(
-                        appInfo = app,
-                        onLaunch = { attemptLaunch(it) },
-                        onLongPress = { context.openAppInfo(it) }
-                    )
-                }
-            }
-        }
-
-        MinimalSearchField(
-            query = query,
-            onQueryChange = {
-                query = it
-                if (it.isNotEmpty()) {
-                    statusMessage = null
-                }
-                isVoiceMode = false
-            },
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
-        )
-
-        Text(
-            text = versionLabel,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.TopStart)
-        )
-
-        statusMessage?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 36.dp)
-            )
-        }
-
-        if (voiceHudVisible || isRecording || isTranscribing) {
-            VoiceControlChip(
-                isRecording = isRecording,
-                isTranscribing = isTranscribing,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .imePadding(),
-                onTap = {
-                    if (isRecording) {
-                        stopRecordingAndTranscribe()
-                    }
-                }
-            )
-        }
-
-        gatedLaunchApp?.let { app ->
-            AlertDialog(
-                onDismissRequest = {
-                    gatedLaunchApp = null
-                    launchPassphrase = ""
-                    launchGateError = null
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            val isValid = OttoPolicyController.verifyLaunchPassphrase(
-                                context = context,
-                                packageName = app.packageName,
-                                attemptedPassphrase = launchPassphrase
-                            )
-                            if (isValid) {
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
                                 gatedLaunchApp = null
-                                launchGateError = null
                                 launchPassphrase = ""
-                                context.launchApp(app)
-                                statusMessage = "Opening ${app.label}"
-                            } else {
-                                launchGateError = OttoPolicyController.launchGateFailureMessage(app.packageName)
+                                launchGateError = null
+                            }
+                        ) {
+                            Text("Cancel")
+                        }
+                    },
+                    title = {
+                        Text("After-Hours Gate")
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                OttoPolicyController.launchGatePrompt(app.packageName)
+                                    ?: "Enter the passphrase to continue."
+                            )
+                            OutlinedTextField(
+                                value = launchPassphrase,
+                                onValueChange = {
+                                    launchPassphrase = it
+                                    launchGateError = null
+                                },
+                                label = { Text("Passphrase") },
+                                singleLine = true
+                            )
+                            launchGateError?.let { error ->
+                                Text(
+                                    text = error,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
                         }
-                    ) {
-                        Text("Open")
                     }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            gatedLaunchApp = null
-                            launchPassphrase = ""
-                            launchGateError = null
-                        }
-                    ) {
-                        Text("Cancel")
-                    }
-                },
-                title = {
-                    Text("After-Hours Gate")
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            OttoPolicyController.launchGatePrompt(app.packageName)
-                                ?: "Enter the passphrase to continue."
-                        )
-                        OutlinedTextField(
-                            value = launchPassphrase,
-                            onValueChange = {
-                                launchPassphrase = it
-                                launchGateError = null
-                            },
-                            label = { Text("Passphrase") },
-                            singleLine = true
-                        )
-                        launchGateError?.let { error ->
-                            Text(
-                                text = error,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
-            )
+                )
+            }
         }
     }
 }
@@ -1251,3 +1298,10 @@ private val ALLOWED_SYSTEM_LABEL_KEYWORDS = listOf("settings", "maps", "phone", 
 
 private const val TRIPLE_TAP_WINDOW_MS = 400L
 private const val TRIPLE_TAP_APP_LABEL = "Pad"
+private const val PROCESSING_OVERLAY_DURATION_MS = 4200L
+private val PROCESSING_LABELS = listOf(
+    "PROCESSING",
+    "VECTORING",
+    "SCANNING",
+    "CALIBRATING"
+)
