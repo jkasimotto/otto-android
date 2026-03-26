@@ -418,7 +418,9 @@ private object OttoWebsitePolicy {
         "tiktokv.com",
         "ttwstatic.com",
         "ibyteimg.com",
-        "ibytedtos.com"
+        "ibytedtos.com",
+        "9gag.com",
+        "9cache.com"
     )
 
     fun isBlockedDomain(domain: String): Boolean {
