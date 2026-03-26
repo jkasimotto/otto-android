@@ -64,10 +64,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -102,6 +107,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         launcherApps = loadLauncherApps(packageManager)
         val versionLabel = currentVersionName()
+        OttoDiagnostics.info(applicationContext, "MainActivity", "Activity created for Otto $versionLabel.")
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -122,6 +128,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        OttoDiagnostics.info(applicationContext, "MainActivity", "Launcher resumed.")
         refreshLauncherApps()
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
@@ -143,6 +150,7 @@ private fun LauncherScreen(
     versionLabel: String
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val voiceManager = remember(context.applicationContext) {
         VoiceTranscriptionManager(context.applicationContext)
@@ -166,11 +174,17 @@ private fun LauncherScreen(
     var manualProcessingActive by remember { mutableStateOf(false) }
     var manualProcessingLabel by remember { mutableStateOf(PROCESSING_LABELS.first()) }
     var manualProcessingNonce by remember { mutableStateOf(0) }
+    var diagnosticsVisible by remember { mutableStateOf(false) }
+    var diagnosticsText by remember { mutableStateOf("") }
 
     fun triggerProcessingOverlay(label: String = PROCESSING_LABELS[manualProcessingNonce % PROCESSING_LABELS.size]) {
         manualProcessingLabel = label
         manualProcessingActive = true
         manualProcessingNonce += 1
+    }
+
+    fun refreshDiagnostics() {
+        diagnosticsText = OttoDiagnostics.readRecent(context)
     }
 
     LaunchedEffect(manualProcessingActive, manualProcessingNonce) {
@@ -381,6 +395,10 @@ private fun LauncherScreen(
                     .align(Alignment.TopEnd)
                     .navigationBarsPadding(),
                 onOpenSettings = { context.openSystemSettings() },
+                onOpenLogs = {
+                    refreshDiagnostics()
+                    diagnosticsVisible = true
+                },
                 onUpdate = {
                     if (isUpdating) return@QuickActionRow
                     isUpdating = true
@@ -551,6 +569,74 @@ private fun LauncherScreen(
                     }
                 )
             }
+
+            if (diagnosticsVisible) {
+                AlertDialog(
+                    onDismissRequest = { diagnosticsVisible = false },
+                    confirmButton = {
+                        TextButton(onClick = { diagnosticsVisible = false }) {
+                            Text("Close")
+                        }
+                    },
+                    title = {
+                        Text("Diagnostics")
+                    },
+                    text = {
+                        val scrollState = rememberScrollState()
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                text = "Local Otto logs are stored on-device and also emitted to Logcat under tag Otto.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "ADB: adb logcat -s Otto\nFile: ${OttoDiagnostics.filePath(context)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = { refreshDiagnostics() }) {
+                                    Text("Refresh")
+                                }
+                                TextButton(
+                                    onClick = {
+                                        context.sharePlainText(
+                                            title = "Otto Diagnostics",
+                                            text = diagnosticsText.ifBlank { "No diagnostics yet." }
+                                        )
+                                    }
+                                ) {
+                                    Text("Share")
+                                }
+                                TextButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(diagnosticsText))
+                                        Toast.makeText(context, "Diagnostics copied.", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Text("Copy")
+                                }
+                                TextButton(
+                                    onClick = {
+                                        OttoDiagnostics.clear(context)
+                                        refreshDiagnostics()
+                                    }
+                                ) {
+                                    Text("Clear")
+                                }
+                            }
+                            SelectionContainer {
+                                Text(
+                                    text = diagnosticsText.ifBlank { "No diagnostics yet." },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(scrollState)
+                                )
+                            }
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -559,6 +645,7 @@ private fun LauncherScreen(
 private fun QuickActionRow(
     modifier: Modifier = Modifier,
     onOpenSettings: () -> Unit,
+    onOpenLogs: () -> Unit,
     onUpdate: () -> Unit
 ) {
     Row(
@@ -572,6 +659,10 @@ private fun QuickActionRow(
         QuickActionChip(
             label = "Settings",
             onClick = onOpenSettings
+        )
+        QuickActionChip(
+            label = "Logs",
+            onClick = onOpenLogs
         )
     }
 }
@@ -875,6 +966,28 @@ private fun Context.openSystemSettings() {
             Toast.makeText(
                 this,
                 "Unable to open Settings.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+}
+
+private fun Context.sharePlainText(title: String, text: String) {
+    val chooserIntent = Intent.createChooser(
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, title)
+            putExtra(Intent.EXTRA_TEXT, text)
+        },
+        title
+    ).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    runCatching { startActivity(chooserIntent) }
+        .onFailure {
+            Toast.makeText(
+                this,
+                "Unable to share diagnostics.",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -1305,7 +1418,9 @@ private object OttoUpdater {
 
 class OttoPackageInstallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        OttoDiagnostics.info(context.applicationContext, "Updater", "Package install callback status=$status")
+        when (status) {
             PackageInstaller.STATUS_SUCCESS -> {
                 Toast.makeText(context, "Otto updated.", Toast.LENGTH_SHORT).show()
                 OttoPolicyController.markPolicyDirty(
@@ -1329,6 +1444,7 @@ class OttoPackageInstallReceiver : BroadcastReceiver() {
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
                     ?: "Update failed."
+                OttoDiagnostics.warn(context.applicationContext, "Updater", "Package install failed: $message")
                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }

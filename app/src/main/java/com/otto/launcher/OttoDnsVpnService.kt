@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
@@ -38,15 +39,20 @@ class OttoDnsVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnLoopStarted = false
     private var cachedUpstreamServers: List<InetAddress>? = null
+    private var cachedUpstreamNetwork: Network? = null
     private var upstreamServersCacheExpiresAtElapsedRealtime = 0L
+    private var lastLoggedUpstreamSummary: String? = null
+    private var lastDnsFailureLogElapsedRealtime = 0L
 
     override fun onCreate() {
         super.onCreate()
         serviceActive = true
+        OttoDiagnostics.info(applicationContext, "DnsVpn", "VPN service created.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         serviceActive = true
+        OttoDiagnostics.info(applicationContext, "DnsVpn", "VPN service start requested.")
         startForegroundNotification()
         if (!vpnLoopStarted) {
             vpnLoopStarted = true
@@ -62,6 +68,7 @@ class OttoDnsVpnService : VpnService() {
         vpnInterface?.close()
         serviceActive = false
         serviceScope.cancel()
+        OttoDiagnostics.info(applicationContext, "DnsVpn", "VPN service destroyed.")
         super.onDestroy()
     }
 
@@ -69,12 +76,14 @@ class OttoDnsVpnService : VpnService() {
         vpnLoopStarted = false
         vpnInterface?.close()
         serviceActive = false
+        OttoDiagnostics.warn(applicationContext, "DnsVpn", "VPN service revoked by Android.")
         super.onRevoke()
     }
 
     private suspend fun runVpnLoop() {
         while (currentCoroutineContext().isActive) {
             val tunnel = establishDnsTunnel() ?: break
+            OttoDiagnostics.info(applicationContext, "DnsVpn", "DNS tunnel established.")
             vpnInterface = tunnel
             try {
                 processPackets(tunnel)
@@ -120,7 +129,10 @@ class OttoDnsVpnService : VpnService() {
 
     private suspend fun resolveDnsQuery(query: ByteArray): ByteArray? {
         val upstreamServers = upstreamDnsServers()
-        if (upstreamServers.isEmpty()) return null
+        if (upstreamServers.isEmpty()) {
+            logDnsFailure("No upstream DNS servers available.")
+            return null
+        }
 
         for (server in upstreamServers) {
             val response = runCatching {
@@ -140,34 +152,85 @@ class OttoDnsVpnService : VpnService() {
             if (response != null) return response
         }
 
+        logDnsFailure(
+            "DNS query failed against upstream servers: ${upstreamServers.joinToString { it.hostAddress.orEmpty() }}"
+        )
         return null
     }
 
     private fun upstreamDnsServers(): List<InetAddress> {
+        val preferredNetwork = preferredTransportNetwork()
         val now = SystemClock.elapsedRealtime()
         val cached = cachedUpstreamServers
-        if (cached != null && now < upstreamServersCacheExpiresAtElapsedRealtime) {
+        if (cached != null &&
+            preferredNetwork == cachedUpstreamNetwork &&
+            now < upstreamServersCacheExpiresAtElapsedRealtime
+        ) {
             return cached
         }
 
-        val transportNetwork = connectivityManager.allNetworks.firstOrNull { network ->
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@firstOrNull false
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-        }
-        val systemServers = transportNetwork?.let { network ->
+        val systemServers = preferredNetwork?.let { network ->
             connectivityManager.getLinkProperties(network)?.dnsServers.orEmpty()
         }.orEmpty()
 
-        val ipv4Servers = systemServers.filterIsInstance<Inet4Address>()
-        val resolvedServers = if (ipv4Servers.isNotEmpty()) {
-            ipv4Servers
+        val resolvedServers = if (systemServers.isNotEmpty()) {
+            systemServers.distinct()
         } else {
             FALLBACK_DNS_SERVER_ADDRESSES
         }
+        val upstreamSummary = buildString {
+            append(describeNetwork(preferredNetwork))
+            append(" dns=")
+            append(resolvedServers.joinToString { it.hostAddress.orEmpty() })
+        }
+        if (upstreamSummary != lastLoggedUpstreamSummary) {
+            OttoDiagnostics.info(applicationContext, "DnsVpn", "Selected upstream transport: $upstreamSummary")
+            lastLoggedUpstreamSummary = upstreamSummary
+        }
+        cachedUpstreamNetwork = preferredNetwork
         cachedUpstreamServers = resolvedServers
         upstreamServersCacheExpiresAtElapsedRealtime = now + UPSTREAM_DNS_CACHE_TTL_MS
         return resolvedServers
+    }
+
+    private fun preferredTransportNetwork(): Network? {
+        val activeNetwork = connectivityManager.activeNetwork
+        val candidates = connectivityManager.allNetworks.mapNotNull { network ->
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@mapNotNull null
+            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            ) {
+                return@mapNotNull null
+            }
+            network to capabilities
+        }
+        val activeCandidate = candidates.firstOrNull { it.first == activeNetwork }
+        if (activeCandidate?.second?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true) {
+            return activeCandidate.first
+        }
+
+        return candidates.firstOrNull { (_, capabilities) ->
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        }?.first ?: activeCandidate?.first ?: candidates.firstOrNull()?.first
+    }
+
+    private fun describeNetwork(network: Network?): String {
+        if (network == null) return "none"
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        val parts = mutableListOf<String>()
+        parts += "id=$network"
+        if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) parts += "wifi"
+        if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true) parts += "cellular"
+        if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true) parts += "ethernet"
+        if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true) parts += "validated"
+        return parts.joinToString(separator = ",")
+    }
+
+    private fun logDnsFailure(message: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDnsFailureLogElapsedRealtime < DNS_FAILURE_LOG_INTERVAL_MS) return
+        lastDnsFailureLogElapsedRealtime = now
+        OttoDiagnostics.warn(applicationContext, "DnsVpn", message)
     }
 
     private fun startForegroundNotification() {
@@ -219,7 +282,8 @@ class OttoDnsVpnService : VpnService() {
         private const val VPN_MTU = 1500
         private const val DNS_PORT = 53
         private const val DNS_TIMEOUT_MS = 2_000
-        private const val UPSTREAM_DNS_CACHE_TTL_MS = 30_000L
+        private const val DNS_FAILURE_LOG_INTERVAL_MS = 10_000L
+        private const val UPSTREAM_DNS_CACHE_TTL_MS = 5_000L
         private const val MAX_PACKET_SIZE = 32_767
         private const val MAX_DNS_MESSAGE_SIZE = 4_096
         private val FALLBACK_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8")

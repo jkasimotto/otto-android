@@ -281,13 +281,27 @@ object OttoPolicyController {
 
     fun startWebsiteVpnIfNeeded(context: Context) {
         val appContext = context.applicationContext
-        if (VpnService.prepare(appContext) != null) return
-        if (OttoDnsVpnService.isActive()) return
+        if (VpnService.prepare(appContext) != null) {
+            OttoDiagnostics.warn(
+                appContext,
+                "Policy",
+                "Website shield not started because VPN consent is required or another VPN is active."
+            )
+            return
+        }
+        if (OttoDnsVpnService.isActive()) {
+            OttoDiagnostics.info(appContext, "Policy", "Website shield already active.")
+            return
+        }
         runCatching {
             ContextCompat.startForegroundService(
                 appContext,
                 Intent(appContext, OttoDnsVpnService::class.java)
             )
+        }.onSuccess {
+            OttoDiagnostics.info(appContext, "Policy", "Requested website shield start.")
+        }.onFailure { error ->
+            OttoDiagnostics.error(appContext, "Policy", "Failed to start website shield.", error)
         }
     }
 
