@@ -51,12 +51,21 @@ class OttoDnsVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         serviceActive = true
-        OttoDiagnostics.info(applicationContext, "DnsVpn", "VPN service created.")
+        OttoDiagnostics.info(
+            applicationContext,
+            "DnsVpn",
+            "VPN service created; ${OttoDiagnostics.processMarker(applicationContext)}"
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         serviceActive = true
-        OttoDiagnostics.info(applicationContext, "DnsVpn", "VPN service start requested.")
+        OttoDiagnostics.info(
+            applicationContext,
+            "DnsVpn",
+            "VPN service start requested; startId=$startId flags=$flags stickyRestart=${intent == null}; " +
+                OttoDiagnostics.processMarker(applicationContext)
+        )
         startForegroundNotification()
         if (!vpnLoopStarted) {
             vpnLoopStarted = true
@@ -84,6 +93,11 @@ class OttoDnsVpnService : VpnService() {
         hasLoggedTunnelReady = false
         OttoDiagnostics.warn(applicationContext, "DnsVpn", "VPN service revoked by Android.")
         super.onRevoke()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        OttoDiagnostics.warn(applicationContext, "DnsVpn", "VPN service task removed.")
+        super.onTaskRemoved(rootIntent)
     }
 
     private suspend fun runVpnLoop() {

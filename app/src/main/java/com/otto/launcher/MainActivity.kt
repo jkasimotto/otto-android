@@ -107,7 +107,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         launcherApps = loadLauncherApps(packageManager)
         val versionLabel = currentVersionName()
-        OttoDiagnostics.info(applicationContext, "MainActivity", "Activity created for Otto $versionLabel.")
+        OttoDiagnostics.info(
+            applicationContext,
+            "MainActivity",
+            "Activity created for Otto $versionLabel; restored=${savedInstanceState != null}; " +
+                OttoDiagnostics.processMarker(applicationContext)
+        )
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -137,6 +142,15 @@ class MainActivity : ComponentActivity() {
             OttoPolicyController.startWebsiteVpnIfNeeded(this@MainActivity)
             OttoPolicyController.syncLockTaskMode(this@MainActivity)
         }
+    }
+
+    override fun onDestroy() {
+        OttoDiagnostics.info(
+            applicationContext,
+            "MainActivity",
+            "Activity destroyed; finishing=$isFinishing changingConfigurations=$isChangingConfigurations"
+        )
+        super.onDestroy()
     }
 
     private fun refreshLauncherApps() {

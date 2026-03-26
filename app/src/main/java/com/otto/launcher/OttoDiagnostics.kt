@@ -1,6 +1,9 @@
 package com.otto.launcher
 
 import android.content.Context
+import android.os.Process
+import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import java.io.File
 import java.io.PrintWriter
@@ -19,6 +22,7 @@ object OttoDiagnostics {
     private val fileLock = Any()
     private val timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
         .withZone(ZoneId.systemDefault())
+    private val processSessionId = java.lang.Long.toHexString(System.nanoTime())
 
     fun info(context: Context?, category: String, message: String) {
         log(context, Log.INFO, category, message)
@@ -57,6 +61,13 @@ object OttoDiagnostics {
 
     fun filePath(context: Context): String {
         return logFile(context.applicationContext).absolutePath
+    }
+
+    fun processMarker(context: Context): String {
+        val bootCount = runCatching {
+            Settings.Global.getInt(context.applicationContext.contentResolver, Settings.Global.BOOT_COUNT)
+        }.getOrNull()?.toString() ?: "?"
+        return "session=$processSessionId pid=${Process.myPid()} boot=$bootCount uptimeMs=${SystemClock.elapsedRealtime()}"
     }
 
     private fun log(
