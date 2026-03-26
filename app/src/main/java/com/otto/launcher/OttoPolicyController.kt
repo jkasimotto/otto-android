@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.content.pm.PackageManager.NameNotFoundException
 import android.net.VpnService
 import android.os.Build
+import android.os.SystemClock
 import android.os.UserManager
 import androidx.core.content.ContextCompat
 import java.time.DayOfWeek
@@ -19,9 +20,29 @@ import java.time.LocalDateTime
 object OttoPolicyController {
     private const val PREFS_NAME = "otto_policy_controller"
     private const val KEY_LAST_HARD_BLOCKED_APPS = "last_hard_blocked_apps"
+    private const val KEY_LAST_APPLIED_INSTALLED_BLOCKED_APPS = "last_applied_installed_blocked_apps"
     private const val KEY_SLACK_UNLOCKED_UNTIL = "slack_unlocked_until"
+    private const val KEY_LAST_SLACK_SUSPENDED = "last_slack_suspended"
     private const val LOCK_TASK_FEATURE_QUICK_SETTINGS = 1 shl 7
     private const val AUTO_ENTER_LOCK_TASK = false
+    private const val POLICY_REAPPLY_MIN_INTERVAL_MS = 5_000L
+
+    private val policyApplyLock = Any()
+
+    @Volatile
+    private var policyStateDirty = true
+
+    @Volatile
+    private var staticPoliciesDirty = true
+
+    @Volatile
+    private var lastPolicyApplyElapsedRealtime = 0L
+
+    @Volatile
+    private var lastAppliedLockTaskPackages: List<String>? = null
+
+    @Volatile
+    private var lastUserControlDisabledPackages: List<String>? = null
 
     private data class TimeGateRule(
         val packageName: String,
@@ -69,66 +90,139 @@ object OttoPolicyController {
         return dpm.isDeviceOwnerApp(context.packageName)
     }
 
-    fun applyPolicies(context: Context) {
+    fun markPolicyDirty(
+        packageStateChanged: Boolean = false,
+        staticPoliciesChanged: Boolean = false
+    ) {
+        if (packageStateChanged) {
+            invalidateLauncherAppsCache()
+            lastAppliedLockTaskPackages = null
+            lastUserControlDisabledPackages = null
+        }
+        if (staticPoliciesChanged) {
+            staticPoliciesDirty = true
+        }
+        policyStateDirty = true
+    }
+
+    fun applyPolicies(context: Context, force: Boolean = false) {
         val appContext = context.applicationContext
-        val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        val admin = ComponentName(appContext, OttoDeviceAdminReceiver::class.java)
-        if (!dpm.isDeviceOwnerApp(appContext.packageName)) return
-
-        val packageManager = appContext.packageManager
-        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val previousBlockedApps = prefs.getStringSet(KEY_LAST_HARD_BLOCKED_APPS, emptySet()).orEmpty()
-        val currentBlockedApps = hardBlockedAppPackages
-        val installedBlockedApps = currentBlockedApps.filter { isPackageInstalled(packageManager, it) }
-        val packagesToUnblock = previousBlockedApps - currentBlockedApps
-        val isSlackInstalled = isPackageInstalled(packageManager, slackGateRule.packageName)
-        val shouldSuspendSlack = isSlackInstalled && shouldSuspendTimeGatedPackage(appContext, slackGateRule)
-
-        packagesToUnblock.forEach { packageName ->
-            clearPackageState(dpm, admin, packageManager, packageName, clearHidden = true)
+        val now = SystemClock.elapsedRealtime()
+        if (!force && !policyStateDirty && now - lastPolicyApplyElapsedRealtime < POLICY_REAPPLY_MIN_INTERVAL_MS) {
+            return
         }
 
-        installedBlockedApps.forEach { packageName ->
-            runCatching {
-                dpm.setApplicationHidden(admin, packageName, true)
+        synchronized(policyApplyLock) {
+            val synchronizedNow = SystemClock.elapsedRealtime()
+            if (!force && !policyStateDirty &&
+                synchronizedNow - lastPolicyApplyElapsedRealtime < POLICY_REAPPLY_MIN_INTERVAL_MS
+            ) {
+                return
             }
-        }
-        if (installedBlockedApps.isNotEmpty()) {
-            runCatching {
-                dpm.setPackagesSuspended(admin, installedBlockedApps.toTypedArray(), true)
+
+            val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(appContext, OttoDeviceAdminReceiver::class.java)
+            if (!dpm.isDeviceOwnerApp(appContext.packageName)) return
+
+            val packageManager = appContext.packageManager
+            val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val previousBlockedApps = prefs.getStringSet(KEY_LAST_HARD_BLOCKED_APPS, emptySet()).orEmpty()
+            val previousAppliedInstalledBlockedApps = prefs
+                .getStringSet(KEY_LAST_APPLIED_INSTALLED_BLOCKED_APPS, emptySet())
+                .orEmpty()
+            val currentBlockedApps = hardBlockedAppPackages
+            val installedBlockedApps = currentBlockedApps
+                .filter { isPackageInstalled(packageManager, it) }
+                .toSet()
+            val packagesToBlock = installedBlockedApps - previousAppliedInstalledBlockedApps
+            val packagesToUnblock = (
+                (previousBlockedApps - currentBlockedApps) +
+                    (previousAppliedInstalledBlockedApps - installedBlockedApps)
+                ).distinct()
+            val isSlackInstalled = isPackageInstalled(packageManager, slackGateRule.packageName)
+            val shouldSuspendSlack = isSlackInstalled && shouldSuspendTimeGatedPackage(appContext, slackGateRule)
+            val hasSlackSuspendedState = prefs.contains(KEY_LAST_SLACK_SUSPENDED)
+            val previousSlackSuspended = if (hasSlackSuspendedState) {
+                prefs.getBoolean(KEY_LAST_SLACK_SUSPENDED, false)
+            } else {
+                null
             }
-        }
-        if (isSlackInstalled) {
-            clearPackageState(
-                dpm = dpm,
-                admin = admin,
-                packageManager = packageManager,
-                packageName = slackGateRule.packageName,
-                clearHidden = false
-            )
-            if (shouldSuspendSlack) {
+
+            packagesToUnblock.forEach { packageName ->
+                clearPackageState(dpm, admin, packageManager, packageName, clearHidden = true)
+            }
+
+            packagesToBlock.forEach { packageName ->
                 runCatching {
-                    dpm.setPackagesSuspended(admin, arrayOf(slackGateRule.packageName), true)
+                    dpm.setApplicationHidden(admin, packageName, true)
                 }
             }
-        }
+            if (packagesToBlock.isNotEmpty()) {
+                runCatching {
+                    dpm.setPackagesSuspended(admin, packagesToBlock.toTypedArray(), true)
+                }
+            }
+            if (isSlackInstalled) {
+                when {
+                    previousSlackSuspended == null -> {
+                        clearPackageState(
+                            dpm = dpm,
+                            admin = admin,
+                            packageManager = packageManager,
+                            packageName = slackGateRule.packageName,
+                            clearHidden = false
+                        )
+                        if (shouldSuspendSlack) {
+                            runCatching {
+                                dpm.setPackagesSuspended(admin, arrayOf(slackGateRule.packageName), true)
+                            }
+                        }
+                    }
 
-        runCatching {
-            dpm.setUserControlDisabledPackages(admin, (installedBlockedApps + appContext.packageName).distinct())
-        }
-        runCatching {
-            dpm.setUninstallBlocked(admin, appContext.packageName, true)
-        }
+                    previousSlackSuspended != shouldSuspendSlack -> {
+                        if (shouldSuspendSlack) {
+                            runCatching {
+                                dpm.setPackagesSuspended(admin, arrayOf(slackGateRule.packageName), true)
+                            }
+                        } else {
+                            clearPackageState(
+                                dpm = dpm,
+                                admin = admin,
+                                packageManager = packageManager,
+                                packageName = slackGateRule.packageName,
+                                clearHidden = false
+                            )
+                        }
+                    }
+                }
+            }
 
-        applyUserRestrictions(dpm, admin)
-        applyPersistentHome(dpm, admin, appContext)
-        applyLockTaskPackages(dpm, admin, appContext)
-        applyLockTaskFeatures(dpm, admin)
-        applyAlwaysOnVpnPolicy(dpm, admin, appContext)
+            val userControlDisabledPackages = (installedBlockedApps + appContext.packageName)
+                .distinct()
+                .sorted()
+            if (lastUserControlDisabledPackages != userControlDisabledPackages) {
+                runCatching {
+                    dpm.setUserControlDisabledPackages(admin, userControlDisabledPackages)
+                }.onSuccess {
+                    lastUserControlDisabledPackages = userControlDisabledPackages
+                }
+            }
+            runCatching {
+                dpm.setUninstallBlocked(admin, appContext.packageName, true)
+            }
 
-        prefs.edit()
-            .putStringSet(KEY_LAST_HARD_BLOCKED_APPS, currentBlockedApps)
-            .apply()
+            applyStaticPoliciesIfNeeded(dpm, admin, appContext)
+            applyLockTaskPackagesIfChanged(dpm, admin, appContext)
+
+            prefs.edit()
+                .putStringSet(KEY_LAST_HARD_BLOCKED_APPS, currentBlockedApps)
+                .putStringSet(KEY_LAST_APPLIED_INSTALLED_BLOCKED_APPS, installedBlockedApps)
+                .putBoolean(KEY_LAST_SLACK_SUSPENDED, isSlackInstalled && shouldSuspendSlack)
+                .apply()
+
+            policyStateDirty = false
+            lastPolicyApplyElapsedRealtime = SystemClock.elapsedRealtime()
+        }
     }
 
     fun requiresLaunchPassphrase(context: Context, packageName: String): Boolean {
@@ -151,6 +245,7 @@ object OttoPolicyController {
             .putLong(KEY_SLACK_UNLOCKED_UNTIL, System.currentTimeMillis() + rule.temporaryUnlockDurationMs)
             .apply()
 
+        markPolicyDirty()
         applyPolicies(context.applicationContext)
         return true
     }
@@ -187,6 +282,7 @@ object OttoPolicyController {
     fun startWebsiteVpnIfNeeded(context: Context) {
         val appContext = context.applicationContext
         if (VpnService.prepare(appContext) != null) return
+        if (OttoDnsVpnService.isActive()) return
         runCatching {
             ContextCompat.startForegroundService(
                 appContext,
@@ -240,7 +336,20 @@ object OttoPolicyController {
         runCatching { dpm.addPersistentPreferredActivity(admin, homeFilter, homeComponent) }
     }
 
-    private fun applyLockTaskPackages(
+    private fun applyStaticPoliciesIfNeeded(
+        dpm: DevicePolicyManager,
+        admin: ComponentName,
+        context: Context
+    ) {
+        if (!staticPoliciesDirty) return
+        applyUserRestrictions(dpm, admin)
+        applyPersistentHome(dpm, admin, context)
+        applyLockTaskFeatures(dpm, admin)
+        applyAlwaysOnVpnPolicy(dpm, admin, context)
+        staticPoliciesDirty = false
+    }
+
+    private fun applyLockTaskPackagesIfChanged(
         dpm: DevicePolicyManager,
         admin: ComponentName,
         context: Context
@@ -251,7 +360,13 @@ object OttoPolicyController {
             .distinct()
             .sorted()
 
-        runCatching { dpm.setLockTaskPackages(admin, allowedPackages.toTypedArray()) }
+        if (allowedPackages == lastAppliedLockTaskPackages) return
+
+        runCatching {
+            dpm.setLockTaskPackages(admin, allowedPackages.toTypedArray())
+        }.onSuccess {
+            lastAppliedLockTaskPackages = allowedPackages
+        }
     }
 
     private fun applyLockTaskFeatures(

@@ -13,6 +13,7 @@ import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,7 +21,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
@@ -32,10 +32,21 @@ import kotlin.math.min
 
 class OttoDnsVpnService : VpnService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val connectivityManager by lazy {
+        getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnLoopStarted = false
+    private var cachedUpstreamServers: List<InetAddress>? = null
+    private var upstreamServersCacheExpiresAtElapsedRealtime = 0L
+
+    override fun onCreate() {
+        super.onCreate()
+        serviceActive = true
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        serviceActive = true
         startForegroundNotification()
         if (!vpnLoopStarted) {
             vpnLoopStarted = true
@@ -49,6 +60,7 @@ class OttoDnsVpnService : VpnService() {
     override fun onDestroy() {
         vpnLoopStarted = false
         vpnInterface?.close()
+        serviceActive = false
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -56,6 +68,7 @@ class OttoDnsVpnService : VpnService() {
     override fun onRevoke() {
         vpnLoopStarted = false
         vpnInterface?.close()
+        serviceActive = false
         super.onRevoke()
     }
 
@@ -89,7 +102,7 @@ class OttoDnsVpnService : VpnService() {
         val packetBuffer = ByteArray(MAX_PACKET_SIZE)
 
         while (currentCoroutineContext().isActive) {
-            val packetLength = withContext(Dispatchers.IO) { input.read(packetBuffer) }
+            val packetLength = input.read(packetBuffer)
             if (packetLength <= 0) break
 
             val response = OttoDnsPacketProcessor.processPacket(
@@ -100,10 +113,7 @@ class OttoDnsVpnService : VpnService() {
             )
 
             if (response != null) {
-                withContext(Dispatchers.IO) {
-                    output.write(response)
-                    output.flush()
-                }
+                output.write(response)
             }
         }
     }
@@ -134,7 +144,12 @@ class OttoDnsVpnService : VpnService() {
     }
 
     private fun upstreamDnsServers(): List<InetAddress> {
-        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val now = SystemClock.elapsedRealtime()
+        val cached = cachedUpstreamServers
+        if (cached != null && now < upstreamServersCacheExpiresAtElapsedRealtime) {
+            return cached
+        }
+
         val transportNetwork = connectivityManager.allNetworks.firstOrNull { network ->
             val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@firstOrNull false
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
@@ -145,11 +160,14 @@ class OttoDnsVpnService : VpnService() {
         }.orEmpty()
 
         val ipv4Servers = systemServers.filterIsInstance<Inet4Address>()
-        if (ipv4Servers.isNotEmpty()) return ipv4Servers
-
-        return FALLBACK_DNS_SERVERS.mapNotNull { host ->
-            runCatching { InetAddress.getByName(host) as? Inet4Address }.getOrNull()
+        val resolvedServers = if (ipv4Servers.isNotEmpty()) {
+            ipv4Servers
+        } else {
+            FALLBACK_DNS_SERVER_ADDRESSES
         }
+        cachedUpstreamServers = resolvedServers
+        upstreamServersCacheExpiresAtElapsedRealtime = now + UPSTREAM_DNS_CACHE_TTL_MS
+        return resolvedServers
     }
 
     private fun startForegroundNotification() {
@@ -191,6 +209,9 @@ class OttoDnsVpnService : VpnService() {
     }
 
     companion object {
+        @Volatile
+        private var serviceActive = false
+
         private const val VPN_CHANNEL_ID = "otto_vpn"
         private const val VPN_NOTIFICATION_ID = 2001
         private const val VPN_INTERFACE_ADDRESS = "10.77.0.1"
@@ -198,9 +219,19 @@ class OttoDnsVpnService : VpnService() {
         private const val VPN_MTU = 1500
         private const val DNS_PORT = 53
         private const val DNS_TIMEOUT_MS = 2_000
+        private const val UPSTREAM_DNS_CACHE_TTL_MS = 30_000L
         private const val MAX_PACKET_SIZE = 32_767
         private const val MAX_DNS_MESSAGE_SIZE = 4_096
         private val FALLBACK_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8")
+        private val FALLBACK_DNS_SERVER_ADDRESSES by lazy {
+            FALLBACK_DNS_SERVERS.mapNotNull { host ->
+                runCatching { InetAddress.getByName(host) as? Inet4Address }.getOrNull()
+            }
+        }
+
+        fun isActive(): Boolean {
+            return serviceActive
+        }
     }
 }
 

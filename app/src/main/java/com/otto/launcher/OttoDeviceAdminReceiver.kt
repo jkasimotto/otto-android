@@ -6,18 +6,22 @@ import android.content.Intent
 
 class OttoDeviceAdminReceiver : DeviceAdminReceiver() {
     override fun onEnabled(context: Context, intent: Intent) {
-        OttoPolicyController.applyPolicies(context)
+        OttoPolicyController.markPolicyDirty(staticPoliciesChanged = true)
+        OttoPolicyController.applyPolicies(context, force = true)
     }
 
     override fun onProfileProvisioningComplete(context: Context, intent: Intent) {
-        OttoPolicyController.applyPolicies(context)
+        OttoPolicyController.markPolicyDirty(staticPoliciesChanged = true)
+        OttoPolicyController.applyPolicies(context, force = true)
     }
 
     override fun onLockTaskModeEntering(context: Context, intent: Intent, pkg: String) {
+        OttoPolicyController.markPolicyDirty()
         OttoPolicyController.applyPolicies(context)
     }
 
     override fun onLockTaskModeExiting(context: Context, intent: Intent) {
+        OttoPolicyController.markPolicyDirty()
         OttoPolicyController.applyPolicies(context)
     }
 

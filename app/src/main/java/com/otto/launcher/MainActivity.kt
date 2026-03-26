@@ -702,7 +702,57 @@ data class AppInfo(
     val activityName: String
 )
 
-internal fun loadLauncherApps(packageManager: PackageManager): List<AppInfo> {
+private object LauncherAppsCache {
+    private const val CACHE_TTL_MS = 30_000L
+    private val cacheLock = Any()
+
+    @Volatile
+    private var cachedApps: List<AppInfo>? = null
+
+    @Volatile
+    private var cacheExpiresAtElapsedRealtime = 0L
+
+    fun load(packageManager: PackageManager, forceRefresh: Boolean = false): List<AppInfo> {
+        val now = SystemClock.elapsedRealtime()
+        val cached = cachedApps
+        if (!forceRefresh && cached != null && now < cacheExpiresAtElapsedRealtime) {
+            return cached
+        }
+
+        return synchronized(cacheLock) {
+            val synchronizedNow = SystemClock.elapsedRealtime()
+            val synchronizedCached = cachedApps
+            if (!forceRefresh && synchronizedCached != null && synchronizedNow < cacheExpiresAtElapsedRealtime) {
+                synchronizedCached
+            } else {
+                buildLauncherApps(packageManager).also { freshApps ->
+                    cachedApps = freshApps
+                    cacheExpiresAtElapsedRealtime = synchronizedNow + CACHE_TTL_MS
+                }
+            }
+        }
+    }
+
+    fun invalidate() {
+        synchronized(cacheLock) {
+            cachedApps = null
+            cacheExpiresAtElapsedRealtime = 0L
+        }
+    }
+}
+
+internal fun invalidateLauncherAppsCache() {
+    LauncherAppsCache.invalidate()
+}
+
+internal fun loadLauncherApps(
+    packageManager: PackageManager,
+    forceRefresh: Boolean = false
+): List<AppInfo> {
+    return LauncherAppsCache.load(packageManager, forceRefresh)
+}
+
+private fun buildLauncherApps(packageManager: PackageManager): List<AppInfo> {
     val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)
     }
@@ -1255,6 +1305,10 @@ class OttoPackageInstallReceiver : BroadcastReceiver() {
         when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
             PackageInstaller.STATUS_SUCCESS -> {
                 Toast.makeText(context, "Otto updated.", Toast.LENGTH_SHORT).show()
+                OttoPolicyController.markPolicyDirty(
+                    packageStateChanged = true,
+                    staticPoliciesChanged = true
+                )
                 OttoPolicyController.applyPolicies(context.applicationContext)
             }
 
