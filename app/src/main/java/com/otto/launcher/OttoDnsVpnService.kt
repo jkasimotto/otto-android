@@ -44,6 +44,7 @@ class OttoDnsVpnService : VpnService() {
     private var upstreamServersCacheExpiresAtElapsedRealtime = 0L
     private var lastLoggedUpstreamSummary: String? = null
     private var lastDnsFailureLogElapsedRealtime = 0L
+    private var lastUpstreamTimeoutLogElapsedRealtime = 0L
     private var hasLoggedTunnelReady = false
     private var tunnelRestartWindowStartedAtElapsedRealtime = 0L
     private var tunnelRestartCount = 0
@@ -204,6 +205,7 @@ class OttoDnsVpnService : VpnService() {
         }
 
         for (server in upstreamServers) {
+            val queryStartedAt = SystemClock.elapsedRealtime()
             val response = runCatching {
                 DatagramSocket().use { socket ->
                     if (!protect(socket)) return@use null
@@ -216,6 +218,8 @@ class OttoDnsVpnService : VpnService() {
                     socket.receive(responsePacket)
                     responsePacket.data.copyOf(responsePacket.length)
                 }
+            }.onFailure { error ->
+                logUpstreamTimeout(server, error, SystemClock.elapsedRealtime() - queryStartedAt)
             }.getOrNull()
 
             if (response != null) return response
@@ -252,7 +256,7 @@ class OttoDnsVpnService : VpnService() {
         }.orEmpty()
 
         val resolvedServers = if (systemServers.isNotEmpty()) {
-            systemServers.distinct()
+            prioritizeDnsServers(systemServers.distinct())
         } else {
             FALLBACK_DNS_SERVER_ADDRESSES
         }
@@ -269,6 +273,13 @@ class OttoDnsVpnService : VpnService() {
         cachedUpstreamServers = resolvedServers
         upstreamServersCacheExpiresAtElapsedRealtime = now + UPSTREAM_DNS_CACHE_TTL_MS
         return resolvedServers
+    }
+
+    private fun prioritizeDnsServers(servers: List<InetAddress>): List<InetAddress> {
+        return servers.sortedWith(
+            compareBy<InetAddress> { if (it is Inet4Address) 0 else 1 }
+                .thenBy { servers.indexOf(it) }
+        )
     }
 
     private fun preferredTransportNetwork(): Network? {
@@ -310,6 +321,18 @@ class OttoDnsVpnService : VpnService() {
         if (now - lastDnsFailureLogElapsedRealtime < DNS_FAILURE_LOG_INTERVAL_MS) return
         lastDnsFailureLogElapsedRealtime = now
         OttoDiagnostics.warn(applicationContext, "DnsVpn", message)
+    }
+
+    private fun logUpstreamTimeout(server: InetAddress, error: Throwable, elapsedMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastUpstreamTimeoutLogElapsedRealtime < UPSTREAM_TIMEOUT_LOG_INTERVAL_MS) return
+        lastUpstreamTimeoutLogElapsedRealtime = now
+        OttoDiagnostics.warn(
+            applicationContext,
+            "DnsVpn",
+            "Upstream DNS server ${server.hostAddress.orEmpty()} failed after ${elapsedMs}ms " +
+                "(${error.javaClass.simpleName})."
+        )
     }
 
     private fun startForegroundNotification() {
@@ -362,6 +385,7 @@ class OttoDnsVpnService : VpnService() {
         private const val DNS_PORT = 53
         private const val DNS_TIMEOUT_MS = 2_000
         private const val DNS_FAILURE_LOG_INTERVAL_MS = 10_000L
+        private const val UPSTREAM_TIMEOUT_LOG_INTERVAL_MS = 30_000L
         private const val UPSTREAM_DNS_CACHE_TTL_MS = 5_000L
         private const val TUNNEL_FLAP_WINDOW_MS = 5_000L
         private const val TUNNEL_FLAP_LOG_THRESHOLD = 3
