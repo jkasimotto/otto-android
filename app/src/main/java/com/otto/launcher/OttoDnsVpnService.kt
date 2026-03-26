@@ -423,11 +423,28 @@ private object OttoWebsitePolicy {
         "9cache.com"
     )
 
+    private val nightBlockedDomainSuffixes = setOf(
+        "youtube.com",
+        "youtu.be",
+        "ytimg.com",
+        "googlevideo.com",
+        "yt3.ggpht.com"
+    )
+
+    private fun isNightHours(): Boolean {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return hour < 8 // 12am - 8am
+    }
+
     fun isBlockedDomain(domain: String): Boolean {
         val normalizedDomain = domain.lowercase().trimEnd('.')
-        return blockedDomainSuffixes.any { suffix ->
-            normalizedDomain == suffix || normalizedDomain.endsWith(".$suffix")
-        }
+        if (blockedDomainSuffixes.any { suffix ->
+                normalizedDomain == suffix || normalizedDomain.endsWith(".$suffix")
+            }) return true
+        if (isNightHours() && nightBlockedDomainSuffixes.any { suffix ->
+                normalizedDomain == suffix || normalizedDomain.endsWith(".$suffix")
+            }) return true
+        return false
     }
 }
 
