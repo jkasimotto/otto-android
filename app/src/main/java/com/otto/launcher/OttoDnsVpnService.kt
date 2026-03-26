@@ -113,6 +113,7 @@ class OttoDnsVpnService : VpnService() {
     private fun establishDnsTunnel(): ParcelFileDescriptor? {
         return Builder()
             .setSession("Otto Website Shield")
+            .setBlocking(true)
             .setMtu(VPN_MTU)
             .addAddress(VPN_INTERFACE_ADDRESS, 24)
             .addDnsServer(VPN_DNS_SERVER)
