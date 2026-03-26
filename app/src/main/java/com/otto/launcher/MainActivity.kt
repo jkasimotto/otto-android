@@ -72,6 +72,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -95,7 +96,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
+import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 import kotlin.math.max
 import kotlin.math.min
 import java.util.Locale
@@ -190,6 +197,24 @@ private fun LauncherScreen(
     var manualProcessingNonce by remember { mutableStateOf(0) }
     var diagnosticsVisible by remember { mutableStateOf(false) }
     var diagnosticsText by remember { mutableStateOf("") }
+
+    // Secret notes gesture state: 7-tap version, wait 3s, 7-tap again
+    var secretTapPhase by remember { mutableStateOf(0) } // 0=idle, 1=first-7-done, 2=passkey-prompt, 3=unlocked
+    var secretTapCount by remember { mutableStateOf(0) }
+    var secretLastTapTime by remember { mutableStateOf(0L) }
+    var secretPhaseOneTime by remember { mutableStateOf(0L) }
+    var secretPasskeyInput by rememberSaveable { mutableStateOf("") }
+    var secretPasskeyError by remember { mutableStateOf<String?>(null) }
+    var secretNotesText by rememberSaveable { mutableStateOf("") }
+    var secretActivePasskey by remember { mutableStateOf("") }
+    var secretIsNewPasskey by remember { mutableStateOf(false) }
+    var secretConfirmPasskey by rememberSaveable { mutableStateOf("") }
+    var secretNotesRevealed by remember { mutableStateOf(false) }
+
+    // Feedback notes state
+    var feedbackVisible by remember { mutableStateOf(false) }
+    var feedbackText by rememberSaveable { mutableStateOf("") }
+    var feedbackLoaded by remember { mutableStateOf(false) }
 
     fun triggerProcessingOverlay(label: String = PROCESSING_LABELS[manualProcessingNonce % PROCESSING_LABELS.size]) {
         manualProcessingLabel = label
@@ -378,23 +403,12 @@ private fun LauncherScreen(
                                 when (tapCount) {
                                     1 -> if (!isVoiceMode) statusMessage = null
                                     2 -> {
-                                        val message = handleDoubleTap(apps) { app ->
-                                            attemptLaunch(app)
+                                        // Double-tap background → open feedback notes
+                                        if (!feedbackLoaded) {
+                                            feedbackText = FeedbackNoteStore.load(context)
+                                            feedbackLoaded = true
                                         }
-                                        statusMessage = message
-                                        isVoiceMode = false
-                                        voiceHudVisible = false
-                                        isRecording = false
-                                        isTranscribing = false
-                                        query = ""
-                                    }
-                                    else -> {
-                                        if (!isRecording && !isTranscribing) {
-                                            isVoiceMode = true
-                                            voiceHudVisible = true
-                                            statusMessage = "Voice search ready."
-                                            startVoiceRecording()
-                                        }
+                                        feedbackVisible = true
                                     }
                                 }
                                 tapCount = 0
@@ -478,9 +492,54 @@ private fun LauncherScreen(
                     .align(Alignment.TopStart)
                     .pointerInput(Unit) {
                         detectTapGestures(
+                            onTap = {
+                                val now = SystemClock.elapsedRealtime()
+                                // Reset if tap gap > 600ms
+                                if (now - secretLastTapTime > 600) {
+                                    // Check if we're in phase 1 waiting period and this is a new burst
+                                    if (secretTapPhase == 1) {
+                                        val elapsed = now - secretPhaseOneTime
+                                        if (elapsed in 2500..5000) {
+                                            // Valid wait window (2.5s - 5s), start second burst
+                                            secretTapCount = 1
+                                            secretLastTapTime = now
+                                            return@detectTapGestures
+                                        } else {
+                                            // Outside window, reset everything
+                                            secretTapPhase = 0
+                                            secretTapCount = 0
+                                        }
+                                    } else {
+                                        secretTapCount = 0
+                                    }
+                                }
+                                secretTapCount += 1
+                                secretLastTapTime = now
+
+                                when (secretTapPhase) {
+                                    0 -> {
+                                        if (secretTapCount >= 7) {
+                                            secretTapPhase = 1
+                                            secretPhaseOneTime = now
+                                            secretTapCount = 0
+                                        }
+                                    }
+                                    1 -> {
+                                        if (secretTapCount >= 7) {
+                                            // Both bursts complete — open passkey prompt
+                                            secretTapPhase = 2
+                                            secretTapCount = 0
+                                            secretPasskeyInput = ""
+                                            secretPasskeyError = null
+                                            secretIsNewPasskey = !SecretNoteStore.isPasskeySet(context)
+                                            secretConfirmPasskey = ""
+                                        }
+                                    }
+                                }
+                            },
                             onLongPress = {
-                            triggerProcessingOverlay()
-                            statusMessage = "Processing field engaged."
+                                triggerProcessingOverlay()
+                                statusMessage = "Processing field engaged."
                             }
                         )
                     }
@@ -580,6 +639,201 @@ private fun LauncherScreen(
                                 )
                             }
                         }
+                    }
+                )
+            }
+
+            // ── Passkey prompt dialog ──
+            if (secretTapPhase == 2) {
+                AlertDialog(
+                    onDismissRequest = {
+                        secretTapPhase = 0
+                        secretPasskeyInput = ""
+                        secretConfirmPasskey = ""
+                        secretPasskeyError = null
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                if (secretIsNewPasskey) {
+                                    if (secretPasskeyInput.length < 4) {
+                                        secretPasskeyError = "Passkey must be at least 4 characters."
+                                    } else if (secretPasskeyInput != secretConfirmPasskey) {
+                                        secretPasskeyError = "Passkeys don't match."
+                                    } else {
+                                        SecretNoteStore.setPasskey(context, secretPasskeyInput)
+                                        secretActivePasskey = secretPasskeyInput
+                                        secretNotesText = ""
+                                        secretTapPhase = 3
+                                        secretPasskeyError = null
+                                    }
+                                } else {
+                                    if (SecretNoteStore.verifyPasskey(context, secretPasskeyInput)) {
+                                        secretActivePasskey = secretPasskeyInput
+                                        secretNotesText = SecretNoteStore.loadNotes(context, secretPasskeyInput)
+                                        secretTapPhase = 3
+                                        secretPasskeyError = null
+                                    } else {
+                                        secretPasskeyError = "Wrong passkey."
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Unlock")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                secretTapPhase = 0
+                                secretPasskeyInput = ""
+                                secretConfirmPasskey = ""
+                                secretPasskeyError = null
+                            }
+                        ) {
+                            Text("Cancel")
+                        }
+                    },
+                    title = { Text(if (secretIsNewPasskey) "Create Passkey" else "Enter Passkey") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (secretIsNewPasskey) {
+                                Text("Set a passkey for your secret notes.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            OutlinedTextField(
+                                value = secretPasskeyInput,
+                                onValueChange = {
+                                    secretPasskeyInput = it
+                                    secretPasskeyError = null
+                                },
+                                label = { Text("Passkey") },
+                                singleLine = true,
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                            )
+                            if (secretIsNewPasskey) {
+                                OutlinedTextField(
+                                    value = secretConfirmPasskey,
+                                    onValueChange = {
+                                        secretConfirmPasskey = it
+                                        secretPasskeyError = null
+                                    },
+                                    label = { Text("Confirm Passkey") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation()
+                                )
+                            }
+                            secretPasskeyError?.let { error ->
+                                Text(
+                                    text = error,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+
+            // ── Secret notes editor dialog ──
+            if (secretTapPhase == 3) {
+                AlertDialog(
+                    onDismissRequest = {
+                        SecretNoteStore.saveNotes(context, secretActivePasskey, secretNotesText)
+                        secretTapPhase = 0
+                        secretActivePasskey = ""
+                        secretNotesText = ""
+                        secretPasskeyInput = ""
+                        secretNotesRevealed = false
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                SecretNoteStore.saveNotes(context, secretActivePasskey, secretNotesText)
+                                secretTapPhase = 0
+                                secretActivePasskey = ""
+                                secretNotesText = ""
+                                secretPasskeyInput = ""
+                                secretNotesRevealed = false
+                                Toast.makeText(context, "Saved.", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Text("Save & Close")
+                        }
+                    },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Notes")
+                            TextButton(onClick = { secretNotesRevealed = !secretNotesRevealed }) {
+                                Text(if (secretNotesRevealed) "Hide" else "Show")
+                            }
+                        }
+                    },
+                    text = {
+                        val scrollState = rememberScrollState()
+                        OutlinedTextField(
+                            value = secretNotesText,
+                            onValueChange = { secretNotesText = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(scrollState),
+                            minLines = 8,
+                            maxLines = 20,
+                            placeholder = { Text("Write something...") },
+                            visualTransformation = if (secretNotesRevealed) {
+                                androidx.compose.ui.text.input.VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            }
+                        )
+                    }
+                )
+            }
+
+            // ── Feedback notes dialog ──
+            if (feedbackVisible) {
+                AlertDialog(
+                    onDismissRequest = {
+                        FeedbackNoteStore.save(context, feedbackText)
+                        feedbackVisible = false
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                FeedbackNoteStore.save(context, feedbackText)
+                                feedbackVisible = false
+                                Toast.makeText(context, "Feedback saved.", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Text("Save")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                FeedbackNoteStore.save(context, feedbackText)
+                                feedbackVisible = false
+                            }
+                        ) {
+                            Text("Close")
+                        }
+                    },
+                    title = { Text("Otto Feedback") },
+                    text = {
+                        val scrollState = rememberScrollState()
+                        OutlinedTextField(
+                            value = feedbackText,
+                            onValueChange = { feedbackText = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(scrollState),
+                            minLines = 8,
+                            maxLines = 20,
+                            placeholder = { Text("What could be better about Otto?") }
+                        )
                     }
                 )
             }
@@ -1492,3 +1746,109 @@ private val PROCESSING_LABELS = listOf(
     "SCANNING",
     "CALIBRATING"
 )
+
+// ── Encrypted Notes Storage ────────────────────────────────────────────
+
+private object SecretNoteStore {
+    private const val PREFS_NAME = "otto_secret_notes"
+    private const val KEY_SALT = "enc_salt"
+    private const val KEY_DATA = "enc_data"
+    private const val KEY_VERIFY = "enc_verify"
+    private const val VERIFY_PLAINTEXT = "otto_verified"
+    private const val PBKDF2_ITERATIONS = 100_000
+    private const val KEY_LENGTH_BITS = 256
+    private const val GCM_IV_LENGTH = 12
+    private const val GCM_TAG_LENGTH = 128
+
+    fun isPasskeySet(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.contains(KEY_VERIFY)
+    }
+
+    fun setPasskey(context: Context, passkey: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val key = deriveKey(passkey, salt)
+        val verifyEncrypted = encrypt(VERIFY_PLAINTEXT.toByteArray(Charsets.UTF_8), key)
+        prefs.edit()
+            .putString(KEY_SALT, android.util.Base64.encodeToString(salt, android.util.Base64.NO_WRAP))
+            .putString(KEY_VERIFY, android.util.Base64.encodeToString(verifyEncrypted, android.util.Base64.NO_WRAP))
+            .putString(KEY_DATA, "")
+            .apply()
+    }
+
+    fun verifyPasskey(context: Context, passkey: String): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saltB64 = prefs.getString(KEY_SALT, null) ?: return false
+        val verifyB64 = prefs.getString(KEY_VERIFY, null) ?: return false
+        val salt = android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
+        val verifyData = android.util.Base64.decode(verifyB64, android.util.Base64.NO_WRAP)
+        val key = deriveKey(passkey, salt)
+        val decrypted = decrypt(verifyData, key) ?: return false
+        return String(decrypted, Charsets.UTF_8) == VERIFY_PLAINTEXT
+    }
+
+    fun loadNotes(context: Context, passkey: String): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saltB64 = prefs.getString(KEY_SALT, null) ?: return ""
+        val dataB64 = prefs.getString(KEY_DATA, null)
+        if (dataB64.isNullOrBlank()) return ""
+        val salt = android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
+        val data = android.util.Base64.decode(dataB64, android.util.Base64.NO_WRAP)
+        val key = deriveKey(passkey, salt)
+        val decrypted = decrypt(data, key) ?: return ""
+        return String(decrypted, Charsets.UTF_8)
+    }
+
+    fun saveNotes(context: Context, passkey: String, notes: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saltB64 = prefs.getString(KEY_SALT, null) ?: return
+        val salt = android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
+        val key = deriveKey(passkey, salt)
+        val encrypted = encrypt(notes.toByteArray(Charsets.UTF_8), key)
+        prefs.edit()
+            .putString(KEY_DATA, android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP))
+            .apply()
+    }
+
+    private fun deriveKey(passkey: String, salt: ByteArray): SecretKeySpec {
+        val spec = PBEKeySpec(passkey.toCharArray(), salt, PBKDF2_ITERATIONS, KEY_LENGTH_BITS)
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val keyBytes = factory.generateSecret(spec).encoded
+        return SecretKeySpec(keyBytes, "AES")
+    }
+
+    private fun encrypt(data: ByteArray, key: SecretKeySpec): ByteArray {
+        val iv = ByteArray(GCM_IV_LENGTH).also { SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
+        val encrypted = cipher.doFinal(data)
+        return iv + encrypted
+    }
+
+    private fun decrypt(data: ByteArray, key: SecretKeySpec): ByteArray? {
+        if (data.size < GCM_IV_LENGTH + 1) return null
+        return runCatching {
+            val iv = data.copyOfRange(0, GCM_IV_LENGTH)
+            val ciphertext = data.copyOfRange(GCM_IV_LENGTH, data.size)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
+            cipher.doFinal(ciphertext)
+        }.getOrNull()
+    }
+}
+
+// ── Feedback Notes Storage ─────────────────────────────────────────────
+
+private object FeedbackNoteStore {
+    private const val FILENAME = "otto_feedback.txt"
+
+    fun load(context: Context): String {
+        val file = File(context.filesDir, FILENAME)
+        return if (file.exists()) file.readText() else ""
+    }
+
+    fun save(context: Context, text: String) {
+        File(context.filesDir, FILENAME).writeText(text)
+    }
+}
