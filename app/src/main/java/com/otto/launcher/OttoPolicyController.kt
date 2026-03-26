@@ -167,12 +167,17 @@ object OttoPolicyController {
         }
     }
 
-    fun maybeEnterLockTask(activity: Activity) {
+    fun syncLockTaskMode(activity: Activity) {
         val appContext = activity.applicationContext
         val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val activityManager = activity.getSystemService(ActivityManager::class.java)
-        if (!AUTO_ENTER_LOCK_TASK) return
         if (!dpm.isDeviceOwnerApp(appContext.packageName)) return
+        if (!AUTO_ENTER_LOCK_TASK) {
+            if (activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) {
+                runCatching { activity.stopLockTask() }
+            }
+            return
+        }
         if (!dpm.isLockTaskPermitted(appContext.packageName)) return
         if (activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) return
 

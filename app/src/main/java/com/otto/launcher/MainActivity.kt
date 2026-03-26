@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
                 OttoPolicyController.applyPolicies(this@MainActivity)
             }
             OttoPolicyController.startWebsiteVpnIfNeeded(this@MainActivity)
-            OttoPolicyController.maybeEnterLockTask(this@MainActivity)
+            OttoPolicyController.syncLockTaskMode(this@MainActivity)
         }
     }
 
