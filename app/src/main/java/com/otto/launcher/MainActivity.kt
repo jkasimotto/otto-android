@@ -1,9 +1,12 @@
 package com.otto.launcher
 
 import android.Manifest
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.net.Uri
@@ -86,6 +89,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.min
 import java.util.Locale
@@ -157,6 +161,7 @@ private fun LauncherScreen(
     var gatedLaunchApp by remember { mutableStateOf<AppInfo?>(null) }
     var launchPassphrase by rememberSaveable { mutableStateOf("") }
     var launchGateError by remember { mutableStateOf<String?>(null) }
+    var isUpdating by remember { mutableStateOf(false) }
 
     fun attemptLaunch(app: AppInfo): Boolean {
         return when {
@@ -340,7 +345,24 @@ private fun LauncherScreen(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .navigationBarsPadding(),
-            onOpenSettings = { context.openSystemSettings() }
+            onOpenSettings = { context.openSystemSettings() },
+            onUpdate = {
+                if (isUpdating) return@QuickActionRow
+                isUpdating = true
+                statusMessage = "Checking for Otto updates..."
+                scope.launch {
+                    val result = OttoUpdater.downloadLatestRelease(context)
+                    isUpdating = false
+                    result
+                        .onSuccess { apkFile ->
+                            statusMessage = "Installing update..."
+                            context.installApk(apkFile)
+                        }
+                        .onFailure { error ->
+                            statusMessage = error.message ?: "Update failed."
+                        }
+                }
+            }
         )
 
         if (filteredApps.isNotEmpty()) {
@@ -486,12 +508,17 @@ private fun LauncherScreen(
 @Composable
 private fun QuickActionRow(
     modifier: Modifier = Modifier,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onUpdate: () -> Unit
 ) {
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        QuickActionChip(
+            label = "Update",
+            onClick = onUpdate
+        )
         QuickActionChip(
             label = "Settings",
             onClick = onOpenSettings
@@ -751,6 +778,44 @@ private fun Context.openSystemSettings() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+}
+
+private fun Context.installApk(apkFile: File) {
+    val packageInstaller = packageManager.packageInstaller
+    val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+        setAppPackageName(packageName)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+    }
+    val sessionId = packageInstaller.createSession(params)
+
+    try {
+        packageInstaller.openSession(sessionId).use { session ->
+            apkFile.inputStream().use { input ->
+                session.openWrite("base.apk", 0, apkFile.length()).use { output ->
+                    input.copyTo(output)
+                    session.fsync(output)
+                }
+            }
+
+            val statusIntent = Intent(this, OttoPackageInstallReceiver::class.java)
+            val statusReceiver = PendingIntent.getBroadcast(
+                this,
+                sessionId,
+                statusIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            session.commit(statusReceiver.intentSender)
+        }
+    } catch (error: Exception) {
+        runCatching { packageInstaller.abandonSession(sessionId) }
+        Toast.makeText(
+            this,
+            error.message ?: "Unable to install update.",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
 }
 
 private fun handleDoubleTap(
@@ -1068,12 +1133,111 @@ private object OttoConfig {
 }
 
 private object HttpClientProvider {
-    val client: OkHttpClient by lazy { OkHttpClient() }
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .callTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
+}
+
+private object OttoUpdater {
+    private const val RELEASES_URL = "https://api.github.com/repos/jkasimotto/otto-android/releases/latest"
+    private const val APK_ASSET_NAME = "app-debug.apk"
+
+    suspend fun downloadLatestRelease(context: Context): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            val release = fetchLatestRelease()
+            val assetUrl = release.assetUrl
+            val targetDir = File(context.cacheDir, "updates").apply { mkdirs() }
+            val targetFile = File(targetDir, APK_ASSET_NAME)
+
+            val request = Request.Builder()
+                .url(assetUrl)
+                .header("Accept", "application/octet-stream")
+                .build()
+
+            HttpClientProvider.client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Update download failed with ${response.code}")
+                }
+                val body = response.body ?: throw IOException("Update download returned no body")
+                body.byteStream().use { input ->
+                    targetFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+
+            targetFile
+        }
+    }
+
+    private fun fetchLatestRelease(): ReleaseInfo {
+        val request = Request.Builder()
+            .url(RELEASES_URL)
+            .header("Accept", "application/vnd.github+json")
+            .build()
+
+        HttpClientProvider.client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("Release check failed with ${response.code}")
+            }
+
+            val body = response.body?.string().orEmpty()
+            val root = JSONObject(body)
+            val assets = root.optJSONArray("assets") ?: throw IOException("No release assets found")
+            for (index in 0 until assets.length()) {
+                val asset = assets.optJSONObject(index) ?: continue
+                val name = asset.optString("name")
+                val url = asset.optString("browser_download_url")
+                if (name == APK_ASSET_NAME && url.isNotBlank()) {
+                    return ReleaseInfo(assetUrl = url)
+                }
+            }
+            throw IOException("Latest release does not contain $APK_ASSET_NAME")
+        }
+    }
+
+    private data class ReleaseInfo(
+        val assetUrl: String
+    )
+}
+
+class OttoPackageInstallReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+            PackageInstaller.STATUS_SUCCESS -> {
+                Toast.makeText(context, "Otto updated.", Toast.LENGTH_SHORT).show()
+                OttoPolicyController.applyPolicies(context.applicationContext)
+            }
+
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                val confirmationIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                }
+                confirmationIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { confirmationIntent?.let(context::startActivity) }
+            }
+
+            else -> {
+                val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                    ?: "Update failed."
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }
 
 internal val ALLOWED_SYSTEM_PACKAGES = setOf(
     "com.android.settings",
     "com.samsung.android.settings",
+    "com.android.permissioncontroller",
+    "com.google.android.permissioncontroller",
+    "com.samsung.android.packageinstaller",
+    "com.google.android.packageinstaller",
     "com.google.android.apps.maps",
     "com.google.android.dialer",
     "com.android.dialer",
