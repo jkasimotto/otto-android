@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.FileInputStream
@@ -43,6 +44,9 @@ class OttoDnsVpnService : VpnService() {
     private var upstreamServersCacheExpiresAtElapsedRealtime = 0L
     private var lastLoggedUpstreamSummary: String? = null
     private var lastDnsFailureLogElapsedRealtime = 0L
+    private var hasLoggedTunnelReady = false
+    private var tunnelRestartWindowStartedAtElapsedRealtime = 0L
+    private var tunnelRestartCount = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -68,6 +72,7 @@ class OttoDnsVpnService : VpnService() {
         vpnInterface?.close()
         serviceActive = false
         serviceScope.cancel()
+        hasLoggedTunnelReady = false
         OttoDiagnostics.info(applicationContext, "DnsVpn", "VPN service destroyed.")
         super.onDestroy()
     }
@@ -76,17 +81,27 @@ class OttoDnsVpnService : VpnService() {
         vpnLoopStarted = false
         vpnInterface?.close()
         serviceActive = false
+        hasLoggedTunnelReady = false
         OttoDiagnostics.warn(applicationContext, "DnsVpn", "VPN service revoked by Android.")
         super.onRevoke()
     }
 
     private suspend fun runVpnLoop() {
         while (currentCoroutineContext().isActive) {
-            val tunnel = establishDnsTunnel() ?: break
-            OttoDiagnostics.info(applicationContext, "DnsVpn", "DNS tunnel established.")
+            val tunnel = establishDnsTunnel()
+            if (tunnel == null) {
+                OttoDiagnostics.error(applicationContext, "DnsVpn", "Unable to establish DNS tunnel.")
+                break
+            }
+            if (!hasLoggedTunnelReady) {
+                OttoDiagnostics.info(applicationContext, "DnsVpn", "DNS tunnel established.")
+                hasLoggedTunnelReady = true
+            }
+            val establishedAt = SystemClock.elapsedRealtime()
             vpnInterface = tunnel
             try {
-                processPackets(tunnel)
+                val exitReason = processPackets(tunnel)
+                handleTunnelExit(establishedAt, exitReason)
             } finally {
                 runCatching { tunnel.close() }
                 vpnInterface = null
@@ -105,14 +120,15 @@ class OttoDnsVpnService : VpnService() {
             .establish()
     }
 
-    private suspend fun processPackets(tunnel: ParcelFileDescriptor) {
+    private suspend fun processPackets(tunnel: ParcelFileDescriptor): String {
         val input = FileInputStream(tunnel.fileDescriptor)
         val output = FileOutputStream(tunnel.fileDescriptor)
         val packetBuffer = ByteArray(MAX_PACKET_SIZE)
 
         while (currentCoroutineContext().isActive) {
-            val packetLength = input.read(packetBuffer)
-            if (packetLength <= 0) break
+            val packetLength = runCatching { input.read(packetBuffer) }
+                .getOrElse { error -> return "input read failed (${error.javaClass.simpleName})" }
+            if (packetLength <= 0) return "tunnel input closed"
 
             val response = OttoDnsPacketProcessor.processPacket(
                 packet = packetBuffer,
@@ -122,9 +138,47 @@ class OttoDnsVpnService : VpnService() {
             )
 
             if (response != null) {
-                output.write(response)
+                val writeSucceeded = runCatching {
+                    output.write(response)
+                }.isSuccess
+                if (!writeSucceeded) {
+                    return "tunnel output write failed"
+                }
             }
         }
+        return "packet loop cancelled"
+    }
+
+    private suspend fun handleTunnelExit(establishedAt: Long, exitReason: String) {
+        val now = SystemClock.elapsedRealtime()
+        val runtimeMs = now - establishedAt
+        if (runtimeMs >= TUNNEL_FLAP_WINDOW_MS) {
+            tunnelRestartCount = 0
+            tunnelRestartWindowStartedAtElapsedRealtime = 0L
+            return
+        }
+
+        if (tunnelRestartWindowStartedAtElapsedRealtime == 0L ||
+            now - tunnelRestartWindowStartedAtElapsedRealtime > TUNNEL_FLAP_WINDOW_MS
+        ) {
+            tunnelRestartWindowStartedAtElapsedRealtime = now
+            tunnelRestartCount = 1
+        } else {
+            tunnelRestartCount += 1
+        }
+
+        if (tunnelRestartCount == TUNNEL_FLAP_LOG_THRESHOLD ||
+            tunnelRestartCount % TUNNEL_FLAP_LOG_INTERVAL == 0
+        ) {
+            OttoDiagnostics.warn(
+                applicationContext,
+                "DnsVpn",
+                "DNS tunnel is flapping: $tunnelRestartCount restarts in " +
+                    "${now - tunnelRestartWindowStartedAtElapsedRealtime}ms; last exit=$exitReason"
+            )
+        }
+
+        delay((tunnelRestartCount * TUNNEL_RESTART_BACKOFF_STEP_MS).coerceAtMost(TUNNEL_RESTART_BACKOFF_MAX_MS))
     }
 
     private suspend fun resolveDnsQuery(query: ByteArray): ByteArray? {
@@ -284,6 +338,11 @@ class OttoDnsVpnService : VpnService() {
         private const val DNS_TIMEOUT_MS = 2_000
         private const val DNS_FAILURE_LOG_INTERVAL_MS = 10_000L
         private const val UPSTREAM_DNS_CACHE_TTL_MS = 5_000L
+        private const val TUNNEL_FLAP_WINDOW_MS = 5_000L
+        private const val TUNNEL_FLAP_LOG_THRESHOLD = 3
+        private const val TUNNEL_FLAP_LOG_INTERVAL = 10
+        private const val TUNNEL_RESTART_BACKOFF_STEP_MS = 250L
+        private const val TUNNEL_RESTART_BACKOFF_MAX_MS = 2_000L
         private const val MAX_PACKET_SIZE = 32_767
         private const val MAX_DNS_MESSAGE_SIZE = 4_096
         private val FALLBACK_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8")
