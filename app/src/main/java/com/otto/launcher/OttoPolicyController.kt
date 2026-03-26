@@ -21,6 +21,7 @@ object OttoPolicyController {
     private const val KEY_LAST_HARD_BLOCKED_APPS = "last_hard_blocked_apps"
     private const val KEY_SLACK_UNLOCKED_UNTIL = "slack_unlocked_until"
     private const val LOCK_TASK_FEATURE_QUICK_SETTINGS = 1 shl 7
+    private const val AUTO_ENTER_LOCK_TASK = false
 
     private data class TimeGateRule(
         val packageName: String,
@@ -170,6 +171,7 @@ object OttoPolicyController {
         val appContext = activity.applicationContext
         val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val activityManager = activity.getSystemService(ActivityManager::class.java)
+        if (!AUTO_ENTER_LOCK_TASK) return
         if (!dpm.isDeviceOwnerApp(appContext.packageName)) return
         if (!dpm.isLockTaskPermitted(appContext.packageName)) return
         if (activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) return
@@ -254,6 +256,7 @@ object OttoPolicyController {
         val baseFlags = DevicePolicyManager.LOCK_TASK_FEATURE_SYSTEM_INFO or
             DevicePolicyManager.LOCK_TASK_FEATURE_NOTIFICATIONS or
             DevicePolicyManager.LOCK_TASK_FEATURE_HOME or
+            DevicePolicyManager.LOCK_TASK_FEATURE_OVERVIEW or
             DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS or
             DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD
 
