@@ -149,7 +149,7 @@ class OttoDnsVpnService : VpnService() {
             val response = OttoDnsPacketProcessor.processPacket(
                 packet = packetBuffer,
                 length = packetLength,
-                isBlockedDomain = { domain -> OttoWebsitePolicy.isBlockedDomain(domain) },
+                isBlockedDomain = { domain -> OttoWebsitePolicy.isBlockedDomain(domain, this@OttoDnsVpnService) },
                 forwardQuery = { query -> resolveDnsQuery(query) }
             )
 
@@ -408,6 +408,9 @@ class OttoDnsVpnService : VpnService() {
 }
 
 private object OttoWebsitePolicy {
+    private const val PREFS_NAME = "otto_website_policy"
+    private const val RATE_LIMIT_INTERVAL_MS = 3L * 24 * 60 * 60 * 1000 // 3 days
+
     private val blockedDomainSuffixes = setOf(
         "reddit.com",
         "redd.it",
@@ -418,14 +421,58 @@ private object OttoWebsitePolicy {
         "tiktokv.com",
         "ttwstatic.com",
         "ibyteimg.com",
-        "ibytedtos.com"
+        "ibytedtos.com",
+        "9gag.com",
+        "9cache.com"
     )
 
-    fun isBlockedDomain(domain: String): Boolean {
-        val normalizedDomain = domain.lowercase().trimEnd('.')
-        return blockedDomainSuffixes.any { suffix ->
-            normalizedDomain == suffix || normalizedDomain.endsWith(".$suffix")
+    private val nightBlockedDomainSuffixes = setOf(
+        "youtube.com",
+        "youtu.be",
+        "ytimg.com",
+        "googlevideo.com",
+        "yt3.ggpht.com"
+    )
+
+    // Rate-limited news sites: group key → domain suffixes
+    private val rateLimitedGroups = mapOf(
+        "abc" to setOf("abc.net.au", "abcnews.go.com", "abcnews.com"),
+        "bbc" to setOf("bbc.com", "bbc.co.uk", "bbci.co.uk"),
+        "aljazeera" to setOf("aljazeera.com", "aljazeera.net")
+    )
+
+    private fun isNightHours(): Boolean {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return hour < 8 // 12am - 8am
+    }
+
+    private fun matchesSuffix(domain: String, suffixes: Set<String>): Boolean {
+        return suffixes.any { suffix -> domain == suffix || domain.endsWith(".$suffix") }
+    }
+
+    private fun isRateLimited(domain: String, context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        for ((groupKey, suffixes) in rateLimitedGroups) {
+            if (matchesSuffix(domain, suffixes)) {
+                val lastAccess = prefs.getLong("rate_$groupKey", 0L)
+                if (now - lastAccess < RATE_LIMIT_INTERVAL_MS) {
+                    return true // still within cooldown — block
+                }
+                // Allowed — record access time
+                prefs.edit().putLong("rate_$groupKey", now).apply()
+                return false
+            }
         }
+        return false
+    }
+
+    fun isBlockedDomain(domain: String, context: Context): Boolean {
+        val normalizedDomain = domain.lowercase().trimEnd('.')
+        if (matchesSuffix(normalizedDomain, blockedDomainSuffixes)) return true
+        if (isNightHours() && matchesSuffix(normalizedDomain, nightBlockedDomainSuffixes)) return true
+        if (isRateLimited(normalizedDomain, context)) return true
+        return false
     }
 }
 
