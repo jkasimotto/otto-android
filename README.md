@@ -20,6 +20,11 @@ A minimal Android home screen replacement focused on quickly searching and launc
 3. Use the **app** run configuration to deploy to an emulator or device (Android 8.0 / API 26+ required). Approve the microphone permission the first time you double-tap for voice.
 4. After installation, press the home button and choose **Otto Launcher** as the default home app to test the experience.
 
+## Releasing
+- Run `./scripts/release.sh` to publish the version already set in `app/build.gradle.kts`.
+- Run `./scripts/release.sh 1.22` to bump to `versionName = "1.22"`, increment `versionCode`, build `app-debug.apk`, push the current branch, tag `v1.22`, and create the GitHub release.
+- The release asset must stay named `app-debug.apk` because the in-app updater downloads that exact filename from the latest GitHub release.
+
 ## Next ideas
 - Persist custom ordering or pinned apps
 - Add keyboard shortcuts / richer agent prompting and context
