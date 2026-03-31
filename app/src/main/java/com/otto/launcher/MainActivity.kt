@@ -141,6 +141,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         OttoDiagnostics.info(applicationContext, "MainActivity", "Launcher resumed.")
+        ActivityTracker.recordReturn(applicationContext)
         refreshLauncherApps()
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
@@ -215,6 +216,15 @@ private fun LauncherScreen(
     var feedbackVisible by remember { mutableStateOf(false) }
     var feedbackText by rememberSaveable { mutableStateOf("") }
     var feedbackLoaded by remember { mutableStateOf(false) }
+
+    // Activity stats state
+    var statsPasswordPromptVisible by remember { mutableStateOf(false) }
+    var statsPasswordInput by rememberSaveable { mutableStateOf("") }
+    var statsPasswordError by remember { mutableStateOf<String?>(null) }
+    var statsVisible by remember { mutableStateOf(false) }
+    var statsText by remember { mutableStateOf("") }
+    var statsIsNewPassword by remember { mutableStateOf(false) }
+    var statsConfirmPassword by rememberSaveable { mutableStateOf("") }
 
     fun triggerProcessingOverlay(label: String = PROCESSING_LABELS[manualProcessingNonce % PROCESSING_LABELS.size]) {
         manualProcessingLabel = label
@@ -426,6 +436,13 @@ private fun LauncherScreen(
                 onOpenLogs = {
                     refreshDiagnostics()
                     diagnosticsVisible = true
+                },
+                onOpenStats = {
+                    statsIsNewPassword = !ActivityTracker.isPasswordSet(context)
+                    statsPasswordInput = ""
+                    statsConfirmPassword = ""
+                    statsPasswordError = null
+                    statsPasswordPromptVisible = true
                 },
                 onUpdate = {
                     if (isUpdating) return@QuickActionRow
@@ -838,6 +855,135 @@ private fun LauncherScreen(
                 )
             }
 
+            // ── Stats password prompt ──
+            if (statsPasswordPromptVisible) {
+                AlertDialog(
+                    onDismissRequest = {
+                        statsPasswordPromptVisible = false
+                        statsPasswordInput = ""
+                        statsConfirmPassword = ""
+                        statsPasswordError = null
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                if (statsIsNewPassword) {
+                                    if (statsPasswordInput.length < 4) {
+                                        statsPasswordError = "Password must be at least 4 characters."
+                                    } else if (statsPasswordInput != statsConfirmPassword) {
+                                        statsPasswordError = "Passwords don't match."
+                                    } else {
+                                        ActivityTracker.initPassword(context, statsPasswordInput)
+                                        val result = ActivityTracker.unlock(context, statsPasswordInput)
+                                        statsText = result?.format() ?: "No data yet."
+                                        statsPasswordPromptVisible = false
+                                        statsVisible = true
+                                        statsPasswordInput = ""
+                                        statsConfirmPassword = ""
+                                        statsPasswordError = null
+                                    }
+                                } else {
+                                    scope.launch {
+                                        val result = withContext(Dispatchers.IO) {
+                                            ActivityTracker.unlock(context, statsPasswordInput)
+                                        }
+                                        if (result != null) {
+                                            statsText = result.format()
+                                            statsPasswordPromptVisible = false
+                                            statsVisible = true
+                                            statsPasswordError = null
+                                        } else {
+                                            statsPasswordError = "Decryption failed."
+                                        }
+                                        statsPasswordInput = ""
+                                        statsConfirmPassword = ""
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Unlock")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                statsPasswordPromptVisible = false
+                                statsPasswordInput = ""
+                                statsConfirmPassword = ""
+                                statsPasswordError = null
+                            }
+                        ) {
+                            Text("Cancel")
+                        }
+                    },
+                    title = { Text(if (statsIsNewPassword) "Set Stats Password" else "Enter Stats Password") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (statsIsNewPassword) {
+                                Text(
+                                    "Set a password for activity tracking. No password is stored — only a salt. Wrong password = garbled data.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            OutlinedTextField(
+                                value = statsPasswordInput,
+                                onValueChange = {
+                                    statsPasswordInput = it
+                                    statsPasswordError = null
+                                },
+                                label = { Text("Password") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation()
+                            )
+                            if (statsIsNewPassword) {
+                                OutlinedTextField(
+                                    value = statsConfirmPassword,
+                                    onValueChange = {
+                                        statsConfirmPassword = it
+                                        statsPasswordError = null
+                                    },
+                                    label = { Text("Confirm Password") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation()
+                                )
+                            }
+                            statsPasswordError?.let { error ->
+                                Text(
+                                    text = error,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+
+            // ── Stats display dialog ──
+            if (statsVisible) {
+                AlertDialog(
+                    onDismissRequest = { statsVisible = false },
+                    confirmButton = {
+                        TextButton(onClick = { statsVisible = false }) {
+                            Text("Close")
+                        }
+                    },
+                    title = { Text("Activity Stats") },
+                    text = {
+                        val scrollState = rememberScrollState()
+                        SelectionContainer {
+                            Text(
+                                text = statsText,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(scrollState)
+                            )
+                        }
+                    }
+                )
+            }
+
             if (diagnosticsVisible) {
                 AlertDialog(
                     onDismissRequest = { diagnosticsVisible = false },
@@ -914,6 +1060,7 @@ private fun QuickActionRow(
     modifier: Modifier = Modifier,
     onOpenSettings: () -> Unit,
     onOpenLogs: () -> Unit,
+    onOpenStats: () -> Unit,
     onUpdate: () -> Unit
 ) {
     Row(
@@ -923,6 +1070,10 @@ private fun QuickActionRow(
         QuickActionChip(
             label = "Update",
             onClick = onUpdate
+        )
+        QuickActionChip(
+            label = "Stats",
+            onClick = onOpenStats
         )
         QuickActionChip(
             label = "Settings",
@@ -1201,6 +1352,9 @@ private fun Context.launchApp(appInfo: AppInfo) {
     }
 
     runCatching { startActivity(launchIntent) }
+        .onSuccess {
+            ActivityTracker.recordAppOpen(this, appInfo.packageName, appInfo.label)
+        }
         .onFailure {
             Toast.makeText(
                 this,
