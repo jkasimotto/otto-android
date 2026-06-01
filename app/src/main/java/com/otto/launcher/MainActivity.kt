@@ -2,7 +2,9 @@ package com.otto.launcher
 
 import android.Manifest
 import android.app.PendingIntent
+import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -42,6 +44,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicNone
+import androidx.compose.material.icons.filled.Tonality
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -218,6 +221,7 @@ private fun LauncherScreen(
     var manualProcessingNonce by remember { mutableStateOf(0) }
     var diagnosticsVisible by remember { mutableStateOf(false) }
     var diagnosticsText by remember { mutableStateOf("") }
+    var greyscaleEnabled by remember { mutableStateOf(context.isGreyscaleEnabled()) }
 
     // Secret notes gesture state: 7-tap version, wait 3s, 7-tap again
     var secretTapPhase by remember { mutableStateOf(0) } // 0=idle, 1=first-7-done, 2=passkey-prompt, 3=unlocked
@@ -231,11 +235,6 @@ private fun LauncherScreen(
     var secretIsNewPasskey by remember { mutableStateOf(false) }
     var secretConfirmPasskey by rememberSaveable { mutableStateOf("") }
     var secretNotesRevealed by remember { mutableStateOf(false) }
-
-    // Feedback notes state
-    var feedbackVisible by remember { mutableStateOf(false) }
-    var feedbackText by rememberSaveable { mutableStateOf("") }
-    var feedbackLoaded by remember { mutableStateOf(false) }
 
     var traceCaptureSheetVisible by remember { mutableStateOf(false) }
     var traceWeightVisible by remember { mutableStateOf(false) }
@@ -339,10 +338,11 @@ private fun LauncherScreen(
         onDispose { voiceManager.dispose() }
     }
 
-    DisposableEffect(lifecycleOwner, traceViewModel) {
+    DisposableEffect(lifecycleOwner, traceViewModel, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 traceViewModel.onLauncherVisible()
+                greyscaleEnabled = context.isGreyscaleEnabled()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -517,12 +517,21 @@ private fun LauncherScreen(
                     .align(Alignment.TopEnd)
                     .navigationBarsPadding(),
                 onOpenSettings = { context.openSystemSettings() },
-                onOpenFeedback = {
-                    if (!feedbackLoaded) {
-                        feedbackText = FeedbackNoteStore.load(context)
-                        feedbackLoaded = true
+                greyscaleEnabled = greyscaleEnabled,
+                onToggleGreyscale = {
+                    val targetEnabled = !context.isGreyscaleEnabled()
+                    if (context.setGreyscaleEnabled(targetEnabled)) {
+                        greyscaleEnabled = context.isGreyscaleEnabled()
+                        statusMessage = if (greyscaleEnabled) "Greyscale on." else "Greyscale off."
+                    } else {
+                        greyscaleEnabled = context.isGreyscaleEnabled()
+                        val openedSettings = context.openGreyscaleSettings()
+                        statusMessage = if (openedSettings) {
+                            "Open Color correction to switch greyscale."
+                        } else {
+                            "Unable to change greyscale."
+                        }
                     }
-                    feedbackVisible = true
                 },
                 onOpenLogs = {
                     refreshDiagnostics()
@@ -554,7 +563,6 @@ private fun LauncherScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(top = 86.dp),
-                    onNextAction = { handleTracePrimaryAction() },
                     onSecondaryAction = { action ->
                         when (action) {
                             is TraceSecondaryAction.NoMeal -> {
@@ -938,51 +946,6 @@ private fun LauncherScreen(
                 )
             }
 
-            // ── Feedback notes dialog ──
-            if (feedbackVisible) {
-                AlertDialog(
-                    onDismissRequest = {
-                        FeedbackNoteStore.save(context, feedbackText)
-                        feedbackVisible = false
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                FeedbackNoteStore.save(context, feedbackText)
-                                feedbackVisible = false
-                                Toast.makeText(context, "Feedback saved.", Toast.LENGTH_SHORT).show()
-                            }
-                        ) {
-                            Text("Save")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = {
-                                FeedbackNoteStore.save(context, feedbackText)
-                                feedbackVisible = false
-                            }
-                        ) {
-                            Text("Close")
-                        }
-                    },
-                    title = { Text("Otto Feedback") },
-                    text = {
-                        val scrollState = rememberScrollState()
-                        OutlinedTextField(
-                            value = feedbackText,
-                            onValueChange = { feedbackText = it },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(scrollState),
-                            minLines = 8,
-                            maxLines = 20,
-                            placeholder = { Text("What could be better about Otto?") }
-                        )
-                    }
-                )
-            }
-
             if (diagnosticsVisible) {
                 AlertDialog(
                     onDismissRequest = { diagnosticsVisible = false },
@@ -1163,7 +1126,8 @@ private fun LauncherScreen(
 private fun QuickActionRow(
     modifier: Modifier = Modifier,
     onOpenSettings: () -> Unit,
-    onOpenFeedback: () -> Unit,
+    greyscaleEnabled: Boolean,
+    onToggleGreyscale: () -> Unit,
     onOpenLogs: () -> Unit,
     onUpdate: () -> Unit
 ) {
@@ -1179,14 +1143,45 @@ private fun QuickActionRow(
             label = "Settings",
             onClick = onOpenSettings
         )
-        QuickActionChip(
-            label = "Feedback",
-            onClick = onOpenFeedback
+        QuickActionIcon(
+            greyscaleEnabled = greyscaleEnabled,
+            onClick = onToggleGreyscale
         )
         QuickActionChip(
             label = "Logs",
             onClick = onOpenLogs
         )
+    }
+}
+
+@Composable
+private fun QuickActionIcon(
+    greyscaleEnabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+        tonalElevation = 3.dp,
+        modifier = Modifier
+            .size(34.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Tonality,
+                contentDescription = if (greyscaleEnabled) "Disable greyscale" else "Enable greyscale",
+                tint = if (greyscaleEnabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(17.dp)
+            )
+        }
     }
 }
 
@@ -1492,6 +1487,77 @@ private fun Context.openSystemSettings() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+}
+
+private fun Context.isGreyscaleEnabled(): Boolean {
+    val enabled = Settings.Secure.getInt(
+        contentResolver,
+        SETTING_DISPLAY_DALTONIZER_ENABLED,
+        0
+    ) == 1
+    val daltonizer = Settings.Secure.getInt(
+        contentResolver,
+        SETTING_DISPLAY_DALTONIZER,
+        DALTONIZER_DISABLED
+    )
+    return enabled && daltonizer == DALTONIZER_SIMULATE_MONOCHROMACY
+}
+
+private fun Context.setGreyscaleEnabled(enabled: Boolean): Boolean {
+    return setGreyscaleViaDevicePolicy(enabled) || setGreyscaleViaSecureSettings(enabled)
+}
+
+private fun Context.setGreyscaleViaDevicePolicy(enabled: Boolean): Boolean {
+    val appContext = applicationContext
+    val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+    if (!dpm.isDeviceOwnerApp(appContext.packageName)) return false
+
+    val admin = ComponentName(appContext, OttoDeviceAdminReceiver::class.java)
+    val daltonizer = if (enabled) DALTONIZER_SIMULATE_MONOCHROMACY else DALTONIZER_DISABLED
+    val enabledValue = if (enabled) 1 else 0
+    return runCatching {
+        dpm.setSecureSetting(admin, SETTING_DISPLAY_DALTONIZER, daltonizer.toString())
+        dpm.setSecureSetting(admin, SETTING_DISPLAY_DALTONIZER_ENABLED, enabledValue.toString())
+        appContext.hasGreyscaleState(enabled)
+    }.getOrDefault(false)
+}
+
+private fun Context.setGreyscaleViaSecureSettings(enabled: Boolean): Boolean {
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_SECURE_SETTINGS) !=
+        PackageManager.PERMISSION_GRANTED
+    ) {
+        return false
+    }
+
+    val daltonizer = if (enabled) DALTONIZER_SIMULATE_MONOCHROMACY else DALTONIZER_DISABLED
+    val enabledValue = if (enabled) 1 else 0
+    return runCatching {
+        Settings.Secure.putInt(contentResolver, SETTING_DISPLAY_DALTONIZER, daltonizer) &&
+            Settings.Secure.putInt(contentResolver, SETTING_DISPLAY_DALTONIZER_ENABLED, enabledValue) &&
+            hasGreyscaleState(enabled)
+    }.getOrDefault(false)
+}
+
+private fun Context.hasGreyscaleState(enabled: Boolean): Boolean {
+    return if (enabled) {
+        isGreyscaleEnabled()
+    } else {
+        Settings.Secure.getInt(contentResolver, SETTING_DISPLAY_DALTONIZER_ENABLED, 0) == 0
+    }
+}
+
+private fun Context.openGreyscaleSettings(): Boolean {
+    val intents = listOf(
+        Intent(COLOR_CORRECTION_SETTINGS_ACTION),
+        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+        Intent(Settings.ACTION_SETTINGS)
+    ).map { intent ->
+        intent.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+    }
+
+    return intents.any { intent ->
+        runCatching { startActivity(intent) }.isSuccess
+    }
 }
 
 private fun Context.sharePlainText(title: String, text: String) {
@@ -1995,6 +2061,11 @@ private val ALLOWED_SYSTEM_LABEL_KEYWORDS = listOf("settings", "maps", "phone", 
 private const val TRIPLE_TAP_WINDOW_MS = 400L
 private const val TRIPLE_TAP_APP_LABEL = "Pad"
 private const val PROCESSING_OVERLAY_DURATION_MS = 4200L
+private const val SETTING_DISPLAY_DALTONIZER_ENABLED = "accessibility_display_daltonizer_enabled"
+private const val SETTING_DISPLAY_DALTONIZER = "accessibility_display_daltonizer"
+private const val DALTONIZER_DISABLED = -1
+private const val DALTONIZER_SIMULATE_MONOCHROMACY = 0
+private const val COLOR_CORRECTION_SETTINGS_ACTION = "com.android.settings.ACCESSIBILITY_COLOR_SPACE_SETTINGS"
 private val PROCESSING_LABELS = listOf(
     "PROCESSING",
     "VECTORING",
@@ -2090,20 +2161,5 @@ private object SecretNoteStore {
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
             cipher.doFinal(ciphertext)
         }.getOrNull()
-    }
-}
-
-// ── Feedback Notes Storage ─────────────────────────────────────────────
-
-private object FeedbackNoteStore {
-    private const val FILENAME = "otto_feedback.txt"
-
-    fun load(context: Context): String {
-        val file = File(context.filesDir, FILENAME)
-        return if (file.exists()) file.readText() else ""
-    }
-
-    fun save(context: Context, text: String) {
-        File(context.filesDir, FILENAME).writeText(text)
     }
 }

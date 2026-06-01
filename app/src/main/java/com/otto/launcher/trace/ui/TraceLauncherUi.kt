@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -72,7 +71,6 @@ import kotlin.math.roundToInt
 fun TraceHomeLayer(
     state: TraceDashboardState,
     modifier: Modifier = Modifier,
-    onNextAction: () -> Unit,
     onSecondaryAction: (TraceSecondaryAction) -> Unit,
     onOpenToday: () -> Unit,
     onOpenWeekly: () -> Unit
@@ -102,11 +100,6 @@ fun TraceHomeLayer(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onNextAction) {
-                    ActionIcon(state.nextAction.kind)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(state.nextAction.primaryLabel)
-                }
                 if (state.nextAction.kind == NextTraceActionKind.FOOD_PHOTO && state.nextAction.mealSlot != null) {
                     TextButton(onClick = { onSecondaryAction(TraceSecondaryAction.NoMeal(state.nextAction.mealSlot)) }) {
                         Text("No meal")
