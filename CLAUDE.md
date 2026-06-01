@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Otto Launcher is a minimal Android home screen replacement for quickly searching and launching apps. It integrates with Groq AI for voice transcription (Whisper) and intelligent app selection (LLaMA), with fuzzy-match fallback.
+Otto Launcher is a minimal Android home screen replacement for quickly searching and launching apps. It includes Trace, a local-only personal evidence layer for low-friction food/drink photo capture, weight logging, sleep confirmation, and weekly coverage summaries.
 
 ## Build & Run
 
@@ -24,24 +24,31 @@ A `.env` file at the repo root must contain `GROQ_API_KEY=...` — Gradle reads 
 
 Single-activity Kotlin app using Jetpack Compose with Material 3 (dark theme only).
 
-**Nearly all logic lives in `app/src/main/java/com/otto/launcher/MainActivity.kt`** (~960 lines). This includes:
+The launcher shell still lives mostly in `app/src/main/java/com/otto/launcher/MainActivity.kt`. This includes:
 - `LauncherScreen()` — root composable with all UI state
 - App discovery and filtering via `PackageManager` (allowlist for system apps, blacklist for problematic packages, explicit WebAPK inclusion)
 - Manual search (case-insensitive substring, 3+ char threshold)
-- Gesture system: single/double/triple tap detection via `pointerInput()` with 400ms timeout window
+- Gesture system: single/double tap detection via `pointerInput()` with 400ms timeout window
 - `VoiceTranscriptionManager` — MediaRecorder → Groq Whisper API
 - `VoiceLaunchAgent` — Groq LLaMA chat completion to resolve spoken intent to an app
 - Fuzzy matching via Levenshtein distance (fallback when AI agent fails)
+
+Trace lives under `app/src/main/java/com/otto/launcher/trace/`:
+- `data/` — Room database, DAO, repository, private media storage, preferences
+- `domain/` — trace enums, summaries, next-action rules, sleep-estimate rules
+- `ui/` — Compose strip, capture sheet, dialogs, CameraX overlay, ViewModel
 
 **Theme files** in `app/src/main/java/com/otto/launcher/ui/theme/` define the Lilac/Charcoal/Graphite color palette.
 
 ## Key Design Decisions
 
-- **Monolithic by design**: co-locating UI, state, and business logic in one file keeps the ~1000-line app simple and state flow transparent. Split if scope grows.
-- **Compose state only**: `mutableStateOf()` and `rememberSaveable()` — no LiveData, Flow, or ViewModel.
+- **Launcher shell stays compact**: app search/policy/updater code remains in the launcher shell; Trace is split into data/domain/UI packages because it has persistence, media, and tests.
+- **Launcher shell state stays simple**: existing launcher controls use `mutableStateOf()` and `rememberSaveable()`.
+- **Trace uses Room + Flow + ViewModel**: Trace summaries are derived from local Room events and emitted into Compose through `TraceViewModel`.
 - **Coroutine-based I/O**: all Groq API calls run on `Dispatchers.IO` via `rememberCoroutineScope()`.
 - **Graceful degradation**: voice features require Groq API key; without it, search and fuzzy match still work.
 - **App filtering**: system apps need explicit allowlist entry; WebAPKs (Chrome PWAs) are always shown.
+- **Trace stays local-first**: food/drink photos are copied into app-private storage; Photo Picker import is used instead of broad media-library permissions.
 
 ## Deployment Rules
 

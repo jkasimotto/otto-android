@@ -17,6 +17,7 @@ import android.provider.Settings
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +70,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.input.ImeAction
@@ -78,7 +81,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.otto.launcher.trace.domain.NextTraceActionKind
+import com.otto.launcher.trace.ui.TraceCameraOverlay
+import com.otto.launcher.trace.ui.TraceCaptureSheet
+import com.otto.launcher.trace.ui.TraceHomeLayer
+import com.otto.launcher.trace.ui.TraceSecondaryAction
+import com.otto.launcher.trace.ui.TraceSettingsDialog
+import com.otto.launcher.trace.ui.TraceSleepDialog
+import com.otto.launcher.trace.ui.TraceTodayDialog
+import com.otto.launcher.trace.ui.TraceViewModel
+import com.otto.launcher.trace.ui.TraceWeeklyDialog
+import com.otto.launcher.trace.ui.TraceWeightDialog
 import com.otto.launcher.ui.theme.OttoLauncherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -172,11 +189,14 @@ private fun LauncherScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val voiceManager = remember(context.applicationContext) {
         VoiceTranscriptionManager(context.applicationContext)
     }
     val voiceAgent = remember { VoiceLaunchAgent() }
+    val traceViewModel: TraceViewModel = viewModel()
+    val traceState by traceViewModel.uiState.collectAsState()
     var tapCount by remember { mutableStateOf(0) }
     var tapTimeoutJob by remember { mutableStateOf<Job?>(null) }
     var lastTapTimestamp by remember { mutableStateOf(0L) }
@@ -216,6 +236,16 @@ private fun LauncherScreen(
     var feedbackVisible by remember { mutableStateOf(false) }
     var feedbackText by rememberSaveable { mutableStateOf("") }
     var feedbackLoaded by remember { mutableStateOf(false) }
+
+    var traceCaptureSheetVisible by remember { mutableStateOf(false) }
+    var traceWeightVisible by remember { mutableStateOf(false) }
+    var traceSleepVisible by remember { mutableStateOf(false) }
+    var traceTodayVisible by remember { mutableStateOf(false) }
+    var traceWeeklyVisible by remember { mutableStateOf(false) }
+    var traceSettingsVisible by remember { mutableStateOf(false) }
+    var traceCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
+    var pendingCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
+    var pendingImportDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
 
     fun triggerProcessingOverlay(label: String = PROCESSING_LABELS[manualProcessingNonce % PROCESSING_LABELS.size]) {
         manualProcessingLabel = label
@@ -268,7 +298,7 @@ private fun LauncherScreen(
         }
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         val action = pendingPermissionAction
@@ -282,8 +312,41 @@ private fun LauncherScreen(
         }
     }
 
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val drinkOnly = pendingCameraDrinkOnly
+        pendingCameraDrinkOnly = null
+        if (granted && drinkOnly != null) {
+            traceCameraDrinkOnly = drinkOnly
+        } else if (!granted) {
+            statusMessage = "Camera permission is required for photo capture."
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        val drinkOnly = pendingImportDrinkOnly ?: false
+        pendingImportDrinkOnly = null
+        uri?.let {
+            traceViewModel.importPhoto(it, drinkOnly)
+            statusMessage = if (drinkOnly) "Drink photo imported." else "Food photo imported."
+        }
+    }
+
     DisposableEffect(voiceManager) {
         onDispose { voiceManager.dispose() }
+    }
+
+    DisposableEffect(lifecycleOwner, traceViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                traceViewModel.onLauncherVisible()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val normalizedQuery = remember(query) { query.trim() }
@@ -341,7 +404,41 @@ private fun LauncherScreen(
             start()
         } else {
             pendingPermissionAction = start
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    fun openTraceCamera(isDrinkOnly: Boolean) {
+        val start = { traceCameraDrinkOnly = isDrinkOnly }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            start()
+        } else {
+            pendingCameraDrinkOnly = isDrinkOnly
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun importTracePhoto(isDrinkOnly: Boolean) {
+        pendingImportDrinkOnly = isDrinkOnly
+        photoPickerLauncher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
+    }
+
+    fun handleTracePrimaryAction() {
+        when (traceState.nextAction.kind) {
+            NextTraceActionKind.CONFIRM_SLEEP -> {
+                traceViewModel.confirmSleepEstimate()
+                statusMessage = "Sleep saved."
+            }
+            NextTraceActionKind.LOG_SLEEP -> traceSleepVisible = true
+            NextTraceActionKind.LOG_WEIGHT -> traceWeightVisible = true
+            NextTraceActionKind.FOOD_PHOTO -> openTraceCamera(isDrinkOnly = false)
+            NextTraceActionKind.DRINK_PHOTO -> openTraceCamera(isDrinkOnly = true)
+            NextTraceActionKind.VIEW_TODAY -> traceTodayVisible = true
+            NextTraceActionKind.OPEN_CAPTURE -> traceCaptureSheetVisible = true
         }
     }
 
@@ -405,12 +502,7 @@ private fun LauncherScreen(
                                 when (tapCount) {
                                     1 -> if (!isVoiceMode) statusMessage = null
                                     2 -> {
-                                        // Double-tap background → open feedback notes
-                                        if (!feedbackLoaded) {
-                                            feedbackText = FeedbackNoteStore.load(context)
-                                            feedbackLoaded = true
-                                        }
-                                        feedbackVisible = true
+                                        handleTracePrimaryAction()
                                     }
                                 }
                                 tapCount = 0
@@ -425,6 +517,13 @@ private fun LauncherScreen(
                     .align(Alignment.TopEnd)
                     .navigationBarsPadding(),
                 onOpenSettings = { context.openSystemSettings() },
+                onOpenFeedback = {
+                    if (!feedbackLoaded) {
+                        feedbackText = FeedbackNoteStore.load(context)
+                        feedbackLoaded = true
+                    }
+                    feedbackVisible = true
+                },
                 onOpenLogs = {
                     refreshDiagnostics()
                     diagnosticsVisible = true
@@ -448,6 +547,35 @@ private fun LauncherScreen(
                     }
                 }
             )
+
+            if (normalizedQuery.isBlank()) {
+                TraceHomeLayer(
+                    state = traceState,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(top = 86.dp),
+                    onNextAction = { handleTracePrimaryAction() },
+                    onSecondaryAction = { action ->
+                        when (action) {
+                            is TraceSecondaryAction.NoMeal -> {
+                                traceViewModel.recordMealAbsence(action.slot)
+                                statusMessage = "No ${action.slot.name.lowercase(Locale.getDefault())} recorded."
+                            }
+                            is TraceSecondaryAction.IgnoreMeal -> {
+                                traceViewModel.ignoreMealPrompt(action.slot)
+                                statusMessage = null
+                            }
+                            TraceSecondaryAction.AdjustSleep -> traceSleepVisible = true
+                            TraceSecondaryAction.IgnoreSleep -> {
+                                traceViewModel.ignoreSleepEstimate()
+                                statusMessage = null
+                            }
+                        }
+                    },
+                    onOpenToday = { traceTodayVisible = true },
+                    onOpenWeekly = { traceWeeklyVisible = true }
+                )
+            }
 
             if (filteredApps.isNotEmpty()) {
                 LazyColumn(
@@ -922,6 +1050,111 @@ private fun LauncherScreen(
                     }
                 )
             }
+
+            if (traceCaptureSheetVisible) {
+                TraceCaptureSheet(
+                    state = traceState,
+                    onDismiss = { traceCaptureSheetVisible = false },
+                    onFoodCamera = {
+                        traceCaptureSheetVisible = false
+                        openTraceCamera(isDrinkOnly = false)
+                    },
+                    onDrinkCamera = {
+                        traceCaptureSheetVisible = false
+                        openTraceCamera(isDrinkOnly = true)
+                    },
+                    onImportFood = {
+                        traceCaptureSheetVisible = false
+                        importTracePhoto(isDrinkOnly = false)
+                    },
+                    onImportDrink = {
+                        traceCaptureSheetVisible = false
+                        importTracePhoto(isDrinkOnly = true)
+                    },
+                    onConfirmSleep = {
+                        traceCaptureSheetVisible = false
+                        traceViewModel.confirmSleepEstimate()
+                        statusMessage = "Sleep saved."
+                    },
+                    onWeight = {
+                        traceCaptureSheetVisible = false
+                        traceWeightVisible = true
+                    },
+                    onSleep = {
+                        traceCaptureSheetVisible = false
+                        traceSleepVisible = true
+                    },
+                    onToday = {
+                        traceCaptureSheetVisible = false
+                        traceTodayVisible = true
+                    },
+                    onSettings = {
+                        traceCaptureSheetVisible = false
+                        traceSettingsVisible = true
+                    }
+                )
+            }
+
+            if (traceWeightVisible) {
+                TraceWeightDialog(
+                    lastWeightKg = traceState.lastWeightKg,
+                    onDismiss = { traceWeightVisible = false },
+                    onSave = {
+                        traceViewModel.recordWeight(it)
+                        statusMessage = "${"%.1f".format(it)}kg saved."
+                    }
+                )
+            }
+
+            if (traceSleepVisible) {
+                TraceSleepDialog(
+                    estimate = traceState.sleepEstimate,
+                    onDismiss = { traceSleepVisible = false },
+                    onSave = { startAt, endAt, adjusted ->
+                        traceViewModel.recordSleep(startAt, endAt, adjusted)
+                        statusMessage = "Sleep saved."
+                    }
+                )
+            }
+
+            if (traceTodayVisible) {
+                TraceTodayDialog(
+                    state = traceState,
+                    onDismiss = { traceTodayVisible = false },
+                    onHide = { traceId, hidden -> traceViewModel.setFoodHidden(traceId, hidden) },
+                    onDrinkOnly = { traceId, drinkOnly -> traceViewModel.setDrinkOnly(traceId, drinkOnly) },
+                    onUpdateNote = { traceId, note -> traceViewModel.updateNote(traceId, note) }
+                )
+            }
+
+            if (traceWeeklyVisible) {
+                TraceWeeklyDialog(
+                    state = traceState,
+                    onDismiss = { traceWeeklyVisible = false }
+                )
+            }
+
+            if (traceSettingsVisible) {
+                TraceSettingsDialog(
+                    state = traceState,
+                    onDismiss = { traceSettingsVisible = false },
+                    onSetCategory = { category, enabled -> traceViewModel.setCategoryEnabled(category, enabled) }
+                )
+            }
+        }
+
+        traceCameraDrinkOnly?.let { drinkOnly ->
+            TraceCameraOverlay(
+                isDrinkOnly = drinkOnly,
+                createOutputFile = { traceViewModel.createCameraImageFile() },
+                onCaptured = { file ->
+                    traceViewModel.recordCameraPhoto(file, drinkOnly)
+                    traceCameraDrinkOnly = null
+                    statusMessage = if (drinkOnly) "Drink photo saved." else "Food photo saved."
+                },
+                onCancel = { traceCameraDrinkOnly = null },
+                onError = { statusMessage = it }
+            )
         }
     }
 }
@@ -930,6 +1163,7 @@ private fun LauncherScreen(
 private fun QuickActionRow(
     modifier: Modifier = Modifier,
     onOpenSettings: () -> Unit,
+    onOpenFeedback: () -> Unit,
     onOpenLogs: () -> Unit,
     onUpdate: () -> Unit
 ) {
@@ -944,6 +1178,10 @@ private fun QuickActionRow(
         QuickActionChip(
             label = "Settings",
             onClick = onOpenSettings
+        )
+        QuickActionChip(
+            label = "Feedback",
+            onClick = onOpenFeedback
         )
         QuickActionChip(
             label = "Logs",
