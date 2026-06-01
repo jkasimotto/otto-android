@@ -189,7 +189,8 @@ private fun LauncherScreen(
     var pendingPermissionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var isVoiceMode by remember { mutableStateOf(false) }
     var gatedLaunchApp by remember { mutableStateOf<AppInfo?>(null) }
-    var launchPassphrase by rememberSaveable { mutableStateOf("") }
+    var launchGateInput by rememberSaveable { mutableStateOf("") }
+    var launchGateCode by rememberSaveable { mutableStateOf("") }
     var launchGateError by remember { mutableStateOf<String?>(null) }
     var isUpdating by remember { mutableStateOf(false) }
     var manualProcessingActive by remember { mutableStateOf(false) }
@@ -251,9 +252,10 @@ private fun LauncherScreen(
                 false
             }
 
-            OttoPolicyController.requiresLaunchPassphrase(context, app.packageName) -> {
+            OttoPolicyController.requiresLaunchGateCode(context, app.packageName) -> {
                 gatedLaunchApp = app
-                launchPassphrase = ""
+                launchGateInput = ""
+                launchGateCode = OttoPolicyController.newLaunchGateCode(app.packageName).orEmpty()
                 launchGateError = null
                 statusMessage = OttoPolicyController.launchGatePrompt(app.packageName)
                 false
@@ -577,21 +579,24 @@ private fun LauncherScreen(
                 AlertDialog(
                     onDismissRequest = {
                         gatedLaunchApp = null
-                        launchPassphrase = ""
+                        launchGateInput = ""
+                        launchGateCode = ""
                         launchGateError = null
                     },
                     confirmButton = {
                         TextButton(
                             onClick = {
-                                val isValid = OttoPolicyController.verifyLaunchPassphrase(
+                                val isValid = OttoPolicyController.verifyLaunchGateCode(
                                     context = context,
                                     packageName = app.packageName,
-                                    attemptedPassphrase = launchPassphrase
+                                    attemptedCode = launchGateInput,
+                                    expectedCode = launchGateCode
                                 )
                                 if (isValid) {
                                     gatedLaunchApp = null
                                     launchGateError = null
-                                    launchPassphrase = ""
+                                    launchGateInput = ""
+                                    launchGateCode = ""
                                     context.launchApp(app)
                                     statusMessage = "Opening ${app.label}"
                                 } else {
@@ -606,7 +611,8 @@ private fun LauncherScreen(
                         TextButton(
                             onClick = {
                                 gatedLaunchApp = null
-                                launchPassphrase = ""
+                                launchGateInput = ""
+                                launchGateCode = ""
                                 launchGateError = null
                             }
                         ) {
@@ -620,16 +626,27 @@ private fun LauncherScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
                                 OttoPolicyController.launchGatePrompt(app.packageName)
-                                    ?: "Enter the passphrase to continue."
+                                    ?: "Type the displayed code to continue."
+                            )
+                            Text(
+                                text = OttoPolicyController.formatLaunchGateCode(launchGateCode),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             OutlinedTextField(
-                                value = launchPassphrase,
+                                value = launchGateInput,
                                 onValueChange = {
-                                    launchPassphrase = it
+                                    launchGateInput = OttoPolicyController
+                                        .normalizeLaunchGateCode(it)
+                                        .take(launchGateCode.length)
                                     launchGateError = null
                                 },
-                                label = { Text("Passphrase") },
-                                singleLine = true
+                                label = { Text("Code") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Characters,
+                                    imeAction = ImeAction.Done
+                                )
                             )
                             launchGateError?.let { error ->
                                 Text(

@@ -14,8 +14,10 @@ import android.os.Build
 import android.os.SystemClock
 import android.os.UserManager
 import androidx.core.content.ContextCompat
+import java.security.SecureRandom
 import java.time.DayOfWeek
 import java.time.LocalDateTime
+import java.util.Locale
 
 object OttoPolicyController {
     private const val PREFS_NAME = "otto_policy_controller"
@@ -26,8 +28,10 @@ object OttoPolicyController {
     private const val LOCK_TASK_FEATURE_QUICK_SETTINGS = 1 shl 7
     private const val AUTO_ENTER_LOCK_TASK = false
     private const val POLICY_REAPPLY_MIN_INTERVAL_MS = 5_000L
+    private const val LAUNCH_GATE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 
     private val policyApplyLock = Any()
+    private val launchGateRandom = SecureRandom()
 
     @Volatile
     private var policyStateDirty = true
@@ -49,7 +53,7 @@ object OttoPolicyController {
         val label: String,
         val startHourInclusive: Int,
         val endHourExclusive: Int,
-        val passphrase: String,
+        val challengeCodeLength: Int,
         val temporaryUnlockDurationMs: Long
     )
 
@@ -71,7 +75,7 @@ object OttoPolicyController {
         label = "Slack",
         startHourInclusive = 9,
         endHourExclusive = 17,
-        passphrase = "jack-and-the-bean-stalk",
+        challengeCodeLength = 15,
         temporaryUnlockDurationMs = 15 * 60 * 1000L
     )
 
@@ -225,19 +229,41 @@ object OttoPolicyController {
         }
     }
 
-    fun requiresLaunchPassphrase(context: Context, packageName: String): Boolean {
+    fun requiresLaunchGateCode(context: Context, packageName: String): Boolean {
         val rule = timeGateRuleFor(packageName) ?: return false
         if (!isPackageInstalled(context.packageManager, rule.packageName)) return false
         return shouldSuspendTimeGatedPackage(context.applicationContext, rule)
     }
 
-    fun verifyLaunchPassphrase(
+    fun newLaunchGateCode(packageName: String): String? {
+        val rule = timeGateRuleFor(packageName) ?: return null
+        return buildString(rule.challengeCodeLength) {
+            repeat(rule.challengeCodeLength) {
+                append(LAUNCH_GATE_ALPHABET[launchGateRandom.nextInt(LAUNCH_GATE_ALPHABET.length)])
+            }
+        }
+    }
+
+    fun normalizeLaunchGateCode(value: String): String {
+        return value
+            .filter { it.isLetter() }
+            .uppercase(Locale.US)
+    }
+
+    fun formatLaunchGateCode(value: String): String {
+        return value.chunked(5).joinToString(" ")
+    }
+
+    fun verifyLaunchGateCode(
         context: Context,
         packageName: String,
-        attemptedPassphrase: String
+        attemptedCode: String,
+        expectedCode: String
     ): Boolean {
         val rule = timeGateRuleFor(packageName) ?: return false
-        if (attemptedPassphrase != rule.passphrase) return false
+        val normalizedExpectedCode = normalizeLaunchGateCode(expectedCode)
+        if (normalizedExpectedCode.length != rule.challengeCodeLength) return false
+        if (normalizeLaunchGateCode(attemptedCode) != normalizedExpectedCode) return false
 
         context.applicationContext
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -252,13 +278,13 @@ object OttoPolicyController {
 
     fun launchGatePrompt(packageName: String): String? {
         return timeGateRuleFor(packageName)?.let {
-            "Enter passphrase to open ${it.label} outside 9am to 5pm."
+            "Type the ${it.challengeCodeLength}-letter code to open ${it.label} outside weekday 9am to 5pm."
         }
     }
 
     fun launchGateFailureMessage(packageName: String): String? {
         return timeGateRuleFor(packageName)?.let {
-            "Incorrect passphrase for ${it.label}."
+            "Incorrect code for ${it.label}."
         }
     }
 
