@@ -5,13 +5,12 @@ import android.net.Uri
 import com.otto.launcher.trace.domain.DailySummary
 import com.otto.launcher.trace.domain.DataCoverage
 import com.otto.launcher.trace.domain.MealSlot
-import com.otto.launcher.trace.domain.NextTraceAction
-import com.otto.launcher.trace.domain.NextTraceActionKind
 import com.otto.launcher.trace.domain.SleepEstimate
 import com.otto.launcher.trace.domain.TraceCategory
 import com.otto.launcher.trace.domain.TraceConfidence
 import com.otto.launcher.trace.domain.TraceDashboardState
 import com.otto.launcher.trace.domain.TraceMedia
+import com.otto.launcher.trace.domain.TracePromptPolicy
 import com.otto.launcher.trace.domain.TraceRules
 import com.otto.launcher.trace.domain.TraceSettingsState
 import com.otto.launcher.trace.domain.TraceSource
@@ -23,7 +22,6 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -258,7 +256,7 @@ class TraceRepository(
             today = today,
             weekly = weekly,
             timeline = timeline,
-            nextAction = nextAction(now, today, evidence, settings, sleepEstimate),
+            nextAction = TracePromptPolicy.nextAction(now, zoneId, today, settings, sleepEstimate),
             sleepEstimate = sleepEstimate,
             lastWeightKg = lastWeight,
             settings = settings
@@ -390,79 +388,6 @@ class TraceRepository(
             }
     }
 
-    private fun nextAction(
-        now: Instant,
-        today: DailySummary,
-        evidence: List<TraceEvidenceEntity>,
-        settings: TraceSettingsState,
-        sleepEstimate: SleepEstimate?
-    ): NextTraceAction {
-        val localTime = now.atZone(zoneId).toLocalTime()
-        val todayDate = today.date
-        if (settings.sleepEnabled && today.sleepDurationMinutes == null && localTime in LocalTime.of(5, 0)..LocalTime.of(11, 30)) {
-            return if (sleepEstimate != null) {
-                NextTraceAction(
-                    kind = NextTraceActionKind.CONFIRM_SLEEP,
-                    title = "Sleep estimate",
-                    detail = "${formatClock(sleepEstimate.startAt)}-${formatClock(sleepEstimate.endAt)} · ${formatDuration(sleepEstimate.durationMinutes)}",
-                    primaryLabel = "Save"
-                )
-            } else {
-                NextTraceAction(
-                    kind = NextTraceActionKind.LOG_SLEEP,
-                    title = "Sleep?",
-                    detail = null,
-                    primaryLabel = "Add"
-                )
-            }
-        }
-
-        if (settings.weightEnabled && today.weightKg == null && localTime in LocalTime.of(5, 0)..LocalTime.of(11, 30)) {
-            return NextTraceAction(
-                kind = NextTraceActionKind.LOG_WEIGHT,
-                title = "Weight?",
-                detail = null,
-                primaryLabel = "Log"
-            )
-        }
-
-        val mealSlot = TraceRules.currentMealWindow(localTime)
-        if (settings.foodEnabled && mealSlot != null && !preferences.isMealWindowSuppressed(mealSlot, now)) {
-            val hasFoodOrAbsence = evidence.any { item ->
-                belongsToDate(item, todayDate) && (
-                    (item.foodCapture != null && !item.foodCapture.hidden && item.foodCapture.isDrinkOnly != true &&
-                        (item.foodCapture.inferredMealSlot == mealSlot || item.foodCapture.mealSlot == mealSlot)) ||
-                        (item.trace.type == TraceType.MEAL_ABSENCE && item.trace.notes?.contains(mealSlot.name.lowercase()) == true)
-                    )
-            }
-            if (!hasFoodOrAbsence) {
-                return NextTraceAction(
-                    kind = NextTraceActionKind.FOOD_PHOTO,
-                    title = "Food photo?",
-                    detail = today.lastFoodAt?.let { "Last food ${formatClock(it)}" },
-                    primaryLabel = "Camera",
-                    mealSlot = mealSlot
-                )
-            }
-        }
-
-        if (today.foodPhotoCount > 0 || today.drinkPhotoCount > 0 || today.weightKg != null || today.sleepDurationMinutes != null) {
-            return NextTraceAction(
-                kind = NextTraceActionKind.VIEW_TODAY,
-                title = "Today",
-                detail = todayLine(today),
-                primaryLabel = "View"
-            )
-        }
-
-        return NextTraceAction(
-            kind = NextTraceActionKind.OPEN_CAPTURE,
-            title = "Capture",
-            detail = null,
-            primaryLabel = "Open"
-        )
-    }
-
     private fun coverage(date: LocalDate, evidence: List<TraceEvidenceEntity>, days: Long): DataCoverage {
         val start = date.minusDays(days - 1)
         val dates = generateSequence(start) { it.plusDays(1) }.take(days.toInt()).toSet()
@@ -502,21 +427,6 @@ class TraceRepository(
                 item.trace.deletedAt == null &&
                 !item.foodCapture.hidden
         }
-    }
-
-    private fun todayLine(today: DailySummary): String {
-        val parts = buildList {
-            today.sleepDurationMinutes?.let { add("Sleep ${formatDuration(it)}") }
-            today.weightKg?.let { add("${formatOneDecimal(it)}kg") }
-            add("Food ${today.foodPhotoCount}")
-            today.eatingWindowMinutes?.let { add("Window ${formatDuration(it)}") }
-        }
-        return parts.joinToString(" · ")
-    }
-
-    private fun formatClock(instant: Instant): String {
-        val value = instant.atZone(zoneId).toLocalTime()
-        return "%02d:%02d".format(value.hour, value.minute)
     }
 
     private fun formatDuration(minutes: Int): String {

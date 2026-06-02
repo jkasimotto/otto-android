@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.LocalDrink
 import androidx.compose.material.icons.filled.MonitorWeight
@@ -50,7 +49,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.otto.launcher.trace.domain.MealSlot
 import com.otto.launcher.trace.domain.NextTraceActionKind
 import com.otto.launcher.trace.domain.SleepEstimate
 import com.otto.launcher.trace.domain.TraceCategory
@@ -71,7 +69,6 @@ import kotlin.math.roundToInt
 fun TraceHomeLayer(
     state: TraceDashboardState,
     modifier: Modifier = Modifier,
-    onSecondaryAction: (TraceSecondaryAction) -> Unit,
     onOpenToday: () -> Unit,
     onOpenWeekly: () -> Unit
 ) {
@@ -84,47 +81,25 @@ fun TraceHomeLayer(
             onOpenToday = onOpenToday,
             onOpenWeekly = onOpenWeekly
         )
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        if (state.nextAction.kind == NextTraceActionKind.CONFIRM_SLEEP ||
+            state.nextAction.kind == NextTraceActionKind.LOG_SLEEP
         ) {
-            Text(
-                text = state.nextAction.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            state.nextAction.detail?.let {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = state.nextAction.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state.nextAction.kind == NextTraceActionKind.FOOD_PHOTO && state.nextAction.mealSlot != null) {
-                    TextButton(onClick = { onSecondaryAction(TraceSecondaryAction.NoMeal(state.nextAction.mealSlot)) }) {
-                        Text("No meal")
-                    }
-                    TextButton(onClick = { onSecondaryAction(TraceSecondaryAction.IgnoreMeal(state.nextAction.mealSlot)) }) {
-                        Text("Ignore")
-                    }
-                } else if (state.nextAction.kind == NextTraceActionKind.CONFIRM_SLEEP) {
-                    TextButton(onClick = { onSecondaryAction(TraceSecondaryAction.AdjustSleep) }) {
-                        Text("Adjust")
-                    }
-                    TextButton(onClick = { onSecondaryAction(TraceSecondaryAction.IgnoreSleep) }) {
-                        Text("Ignore")
-                    }
+                state.nextAction.detail?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
     }
-}
-
-sealed class TraceSecondaryAction {
-    data class NoMeal(val slot: MealSlot) : TraceSecondaryAction()
-    data class IgnoreMeal(val slot: MealSlot) : TraceSecondaryAction()
-    data object AdjustSleep : TraceSecondaryAction()
-    data object IgnoreSleep : TraceSecondaryAction()
 }
 
 @Composable
@@ -172,20 +147,14 @@ fun TraceCaptureSheet(
         title = { Text("Capture") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                TraceActionButton(
-                    icon = { ActionIcon(state.nextAction.kind) },
-                    label = state.nextAction.title,
-                    detail = state.nextAction.detail,
-                    onClick = when (state.nextAction.kind) {
-                        NextTraceActionKind.CONFIRM_SLEEP -> onConfirmSleep
-                        NextTraceActionKind.LOG_SLEEP -> onSleep
-                        NextTraceActionKind.LOG_WEIGHT -> onWeight
-                        NextTraceActionKind.FOOD_PHOTO -> onFoodCamera
-                        NextTraceActionKind.DRINK_PHOTO -> onDrinkCamera
-                        NextTraceActionKind.VIEW_TODAY -> onToday
-                        NextTraceActionKind.OPEN_CAPTURE -> onFoodCamera
-                    }
-                )
+                if (state.nextAction.kind == NextTraceActionKind.CONFIRM_SLEEP) {
+                    TraceActionButton(
+                        icon = { Icon(Icons.Filled.Bedtime, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        label = "Save sleep estimate",
+                        detail = state.nextAction.detail,
+                        onClick = onConfirmSleep
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TraceSmallButton(Icons.Filled.Restaurant, "Food", onFoodCamera)
                     TraceSmallButton(Icons.Filled.LocalDrink, "Drink", onDrinkCamera)
@@ -582,20 +551,6 @@ private fun CategoryToggle(label: String, checked: Boolean, onCheckedChange: (Bo
         Text(label)
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
     }
-}
-
-@Composable
-private fun ActionIcon(kind: NextTraceActionKind) {
-    val icon = when (kind) {
-        NextTraceActionKind.CONFIRM_SLEEP,
-        NextTraceActionKind.LOG_SLEEP -> Icons.Filled.Bedtime
-        NextTraceActionKind.LOG_WEIGHT -> Icons.Filled.MonitorWeight
-        NextTraceActionKind.FOOD_PHOTO -> Icons.Filled.Restaurant
-        NextTraceActionKind.DRINK_PHOTO -> Icons.Filled.LocalDrink
-        NextTraceActionKind.VIEW_TODAY -> Icons.Filled.Today
-        NextTraceActionKind.OPEN_CAPTURE -> Icons.Filled.CameraAlt
-    }
-    Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
 }
 
 fun traceStripText(state: TraceDashboardState): String {

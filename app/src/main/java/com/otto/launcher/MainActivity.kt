@@ -88,11 +88,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.otto.launcher.trace.domain.NextTraceActionKind
 import com.otto.launcher.trace.ui.TraceCameraOverlay
 import com.otto.launcher.trace.ui.TraceCaptureSheet
 import com.otto.launcher.trace.ui.TraceHomeLayer
-import com.otto.launcher.trace.ui.TraceSecondaryAction
 import com.otto.launcher.trace.ui.TraceSettingsDialog
 import com.otto.launcher.trace.ui.TraceSleepDialog
 import com.otto.launcher.trace.ui.TraceTodayDialog
@@ -428,18 +426,7 @@ private fun LauncherScreen(
     }
 
     fun handleTracePrimaryAction() {
-        when (traceState.nextAction.kind) {
-            NextTraceActionKind.CONFIRM_SLEEP -> {
-                traceViewModel.confirmSleepEstimate()
-                statusMessage = "Sleep saved."
-            }
-            NextTraceActionKind.LOG_SLEEP -> traceSleepVisible = true
-            NextTraceActionKind.LOG_WEIGHT -> traceWeightVisible = true
-            NextTraceActionKind.FOOD_PHOTO -> openTraceCamera(isDrinkOnly = false)
-            NextTraceActionKind.DRINK_PHOTO -> openTraceCamera(isDrinkOnly = true)
-            NextTraceActionKind.VIEW_TODAY -> traceTodayVisible = true
-            NextTraceActionKind.OPEN_CAPTURE -> traceCaptureSheetVisible = true
-        }
+        traceCaptureSheetVisible = true
     }
 
     fun stopRecordingAndTranscribe() {
@@ -563,23 +550,6 @@ private fun LauncherScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(top = 86.dp),
-                    onSecondaryAction = { action ->
-                        when (action) {
-                            is TraceSecondaryAction.NoMeal -> {
-                                traceViewModel.recordMealAbsence(action.slot)
-                                statusMessage = "No ${action.slot.name.lowercase(Locale.getDefault())} recorded."
-                            }
-                            is TraceSecondaryAction.IgnoreMeal -> {
-                                traceViewModel.ignoreMealPrompt(action.slot)
-                                statusMessage = null
-                            }
-                            TraceSecondaryAction.AdjustSleep -> traceSleepVisible = true
-                            TraceSecondaryAction.IgnoreSleep -> {
-                                traceViewModel.ignoreSleepEstimate()
-                                statusMessage = null
-                            }
-                        }
-                    },
                     onOpenToday = { traceTodayVisible = true },
                     onOpenWeekly = { traceWeeklyVisible = true }
                 )
