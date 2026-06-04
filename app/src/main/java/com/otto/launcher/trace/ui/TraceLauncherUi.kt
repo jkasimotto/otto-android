@@ -177,11 +177,16 @@ fun TraceCaptureSheet(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    state.timeline.takeLast(3).forEach { item ->
-                        Text(
-                            text = "${formatClock(item.occurredAt)}  ${item.title}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    state.timeline.takeLast(3).asReversed().forEach { item ->
+                        TraceTimelineRow(
+                            item = item,
+                            controlsEnabled = false,
+                            onHide = {},
+                            onDrinkOnly = {},
+                            onEditNote = {},
+                            onEditWeight = {},
+                            onEditSleep = {},
+                            onDelete = {}
                         )
                     }
                 }
@@ -248,6 +253,7 @@ fun TraceWeightDialog(
 @Composable
 fun TraceSleepDialog(
     estimate: SleepEstimate?,
+    title: String = if (estimate != null) "Sleep estimate" else "Sleep",
     onDismiss: () -> Unit,
     onSave: (Instant, Instant, Boolean) -> Unit
 ) {
@@ -278,7 +284,7 @@ fun TraceSleepDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
-        title = { Text(if (estimate != null) "Sleep estimate" else "Sleep") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -311,9 +317,15 @@ fun TraceTodayDialog(
     onDismiss: () -> Unit,
     onHide: (String, Boolean) -> Unit,
     onDrinkOnly: (String, Boolean) -> Unit,
-    onUpdateNote: (String, String?) -> Unit
+    onUpdateNote: (String, String?) -> Unit,
+    onUpdateWeight: (String, Double) -> Unit,
+    onUpdateSleep: (String, Instant, Instant, Boolean) -> Unit,
+    onDelete: (String) -> Unit
 ) {
     var noteTarget by remember { mutableStateOf<TraceTimelineItem?>(null) }
+    var weightTarget by remember { mutableStateOf<TraceTimelineItem?>(null) }
+    var sleepTarget by remember { mutableStateOf<TraceTimelineItem?>(null) }
+    var deleteTarget by remember { mutableStateOf<TraceTimelineItem?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -339,7 +351,10 @@ fun TraceTodayDialog(
                                 item = item,
                                 onHide = { onHide(item.traceId, !item.hidden) },
                                 onDrinkOnly = { onDrinkOnly(item.traceId, !item.isDrinkOnly) },
-                                onEditNote = { noteTarget = item }
+                                onEditNote = { noteTarget = item },
+                                onEditWeight = { weightTarget = item },
+                                onEditSleep = { sleepTarget = item },
+                                onDelete = { deleteTarget = item }
                             )
                         }
                     }
@@ -371,6 +386,54 @@ fun TraceTodayDialog(
                     onValueChange = { text = it.take(240) },
                     minLines = 3,
                     maxLines = 5
+                )
+            }
+        )
+    }
+    weightTarget?.let { target ->
+        TraceWeightDialog(
+            lastWeightKg = target.weightKg,
+            onDismiss = { weightTarget = null },
+            onSave = {
+                onUpdateWeight(target.traceId, it)
+                weightTarget = null
+            }
+        )
+    }
+    sleepTarget?.let { target ->
+        target.endedAt?.let { endedAt ->
+            TraceSleepDialog(
+                estimate = SleepEstimate(target.occurredAt, endedAt),
+                title = "Sleep",
+                onDismiss = { sleepTarget = null },
+                onSave = { startAt, endAt, adjusted ->
+                    onUpdateSleep(target.traceId, startAt, endAt, adjusted)
+                    sleepTarget = null
+                }
+            )
+        }
+    }
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(target.traceId)
+                        deleteTarget = null
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
+            },
+            title = { Text("Delete ${target.title}?") },
+            text = {
+                Text(
+                    text = "This removes the item from Trace.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         )
@@ -483,9 +546,13 @@ private fun TraceSmallButton(
 @Composable
 private fun TraceTimelineRow(
     item: TraceTimelineItem,
+    controlsEnabled: Boolean = true,
     onHide: () -> Unit,
     onDrinkOnly: () -> Unit,
-    onEditNote: () -> Unit
+    onEditNote: () -> Unit,
+    onEditWeight: () -> Unit,
+    onEditSleep: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -512,15 +579,37 @@ private fun TraceTimelineRow(
             item.notes?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (item.type == TraceType.FOOD_PHOTO || item.type == TraceType.DRINK_PHOTO) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = onEditNote) { Text("Note") }
-                    TextButton(onClick = onDrinkOnly) { Text(if (item.isDrinkOnly) "Food" else "Drink") }
-                    IconButton(onClick = onHide) {
-                        Icon(
-                            imageVector = if (item.hidden) Icons.Filled.Visibility else Icons.Filled.HideImage,
-                            contentDescription = null
-                        )
+            if (controlsEnabled) {
+                when {
+                    item.type == TraceType.FOOD_PHOTO || item.type == TraceType.DRINK_PHOTO -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = onEditNote) { Text("Note") }
+                            TextButton(onClick = onDrinkOnly) { Text(if (item.isDrinkOnly) "Food" else "Drink") }
+                            IconButton(onClick = onHide) {
+                                Icon(
+                                    imageVector = if (item.hidden) Icons.Filled.Visibility else Icons.Filled.HideImage,
+                                    contentDescription = null
+                                )
+                            }
+                            TextButton(onClick = onDelete) { Text("Delete") }
+                        }
+                    }
+                    item.type == TraceType.WEIGHT -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = onEditWeight) { Text("Edit") }
+                            TextButton(onClick = onDelete) { Text("Delete") }
+                        }
+                    }
+                    item.type == TraceType.SLEEP_SESSION -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = onEditSleep) { Text("Edit") }
+                            TextButton(onClick = onDelete) { Text("Delete") }
+                        }
+                    }
+                    else -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = onDelete) { Text("Delete") }
+                        }
                     }
                 }
             }

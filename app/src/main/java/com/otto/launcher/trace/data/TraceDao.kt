@@ -27,6 +27,16 @@ abstract class TraceDao {
     @Query(
         """
         SELECT * FROM traces
+        WHERE deletedAt IS NULL
+        ORDER BY occurredAt ASC
+        """
+    )
+    abstract fun observeEvidence(): Flow<List<TraceEvidenceEntity>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT * FROM traces
         WHERE occurredAt >= :start
           AND occurredAt < :end
           AND deletedAt IS NULL
@@ -63,6 +73,24 @@ abstract class TraceDao {
     @Query("SELECT * FROM traces WHERE id = :traceId LIMIT 1")
     abstract suspend fun evidenceById(traceId: String): TraceEvidenceEntity?
 
+    @Transaction
+    @Query(
+        """
+        SELECT * FROM traces
+        WHERE type = :type
+          AND endedAt >= :start
+          AND endedAt < :end
+          AND deletedAt IS NULL
+        ORDER BY endedAt DESC
+        LIMIT 1
+        """
+    )
+    abstract suspend fun latestEvidenceEndingBetween(
+        type: TraceType,
+        start: Instant,
+        end: Instant
+    ): TraceEvidenceEntity?
+
     @Query("SELECT * FROM media_assets")
     abstract fun observeMediaAssets(): Flow<List<MediaAssetEntity>>
 
@@ -89,6 +117,12 @@ abstract class TraceDao {
 
     @Update
     abstract suspend fun updateFoodCapture(foodCapture: FoodCaptureEntity)
+
+    @Update
+    abstract suspend fun updateWeightMeasurement(weightMeasurement: WeightMeasurementEntity)
+
+    @Update
+    abstract suspend fun updateSleepSession(sleepSession: SleepSessionEntity)
 
     @Transaction
     open suspend fun insertFoodTrace(

@@ -88,6 +88,27 @@ class TraceViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateWeight(traceId: String, kilograms: Double) {
+        viewModelScope.launch {
+            repository.updateWeight(traceId, kilograms)
+            refresh()
+        }
+    }
+
+    fun updateSleep(traceId: String, startAt: Instant, endAt: Instant, wasAdjustedByUser: Boolean) {
+        viewModelScope.launch {
+            repository.updateSleep(traceId, startAt, endAt, wasAdjustedByUser)
+            refresh()
+        }
+    }
+
+    fun deleteTrace(traceId: String) {
+        viewModelScope.launch {
+            repository.deleteTrace(traceId)
+            refresh()
+        }
+    }
+
     fun ignoreSleepEstimate() {
         repository.clearSleepEstimate()
         refresh()

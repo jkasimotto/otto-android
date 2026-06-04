@@ -13,13 +13,13 @@ import com.otto.launcher.trace.domain.TraceMedia
 import com.otto.launcher.trace.domain.TracePromptPolicy
 import com.otto.launcher.trace.domain.TraceRules
 import com.otto.launcher.trace.domain.TraceSettingsState
+import com.otto.launcher.trace.domain.TraceSleepPolicy
 import com.otto.launcher.trace.domain.TraceSource
 import com.otto.launcher.trace.domain.TraceTimelineItem
 import com.otto.launcher.trace.domain.TraceType
 import com.otto.launcher.trace.domain.WeeklySummary
 import java.io.File
 import java.time.Clock
-import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -44,11 +44,8 @@ class TraceRepository(
 
     fun observeDashboard(refreshNonce: Flow<Int>): Flow<TraceDashboardState> {
         val initialNow = clock.instant()
-        val initialToday = LocalDate.now(clock)
-        val start = initialToday.minusDays(27).atStartOfDay(zoneId).toInstant()
-        val end = initialToday.plusDays(1).atStartOfDay(zoneId).toInstant()
         return combine(
-            dao.observeEvidenceBetween(start, end),
+            dao.observeEvidence(),
             dao.observeMediaAssets(),
             refreshNonce
         ) { evidence, mediaAssets, _ ->
@@ -106,8 +103,16 @@ class TraceRepository(
         wasAdjustedByUser: Boolean,
         confidence: TraceConfidence = TraceConfidence.USER_CONFIRMED
     ) = withContext(Dispatchers.IO) {
-        val normalizedEnd = if (endAt > startAt) endAt else startAt.plus(Duration.ofMinutes(1))
+        val normalizedEnd = TraceSleepPolicy.normalizedEnd(startAt, endAt)
+        val (dayStart, dayEnd) = TraceSleepPolicy.endDateBounds(normalizedEnd, zoneId)
+        val existing = dao.latestEvidenceEndingBetween(TraceType.SLEEP_SESSION, dayStart, dayEnd)
         val now = clock.instant()
+        if (existing?.sleepSession != null) {
+            updateSleep(existing, startAt, normalizedEnd, wasAdjustedByUser, confidence, now)
+            preferences.clearSleepEstimate()
+            return@withContext
+        }
+
         val traceId = UUID.randomUUID().toString()
         dao.insertSleepTrace(
             trace = TraceEntity(
@@ -126,7 +131,7 @@ class TraceRepository(
                 traceId = traceId,
                 startAt = startAt,
                 endAt = normalizedEnd,
-                durationMinutes = Duration.between(startAt, normalizedEnd).toMinutes().toInt().coerceAtLeast(1),
+                durationMinutes = TraceSleepPolicy.durationMinutes(startAt, normalizedEnd),
                 sourceLabel = if (confidence == TraceConfidence.ESTIMATED) "Launcher estimate" else null,
                 wasAdjustedByUser = wasAdjustedByUser
             )
@@ -171,6 +176,38 @@ class TraceRepository(
         dao.updateFoodCapture(capture.copy(hidden = hidden))
     }
 
+    suspend fun updateWeight(traceId: String, kilograms: Double) = withContext(Dispatchers.IO) {
+        val evidence = dao.evidenceById(traceId) ?: return@withContext
+        val weight = evidence.weightMeasurement ?: return@withContext
+        val now = clock.instant()
+        dao.updateWeightMeasurement(weight.copy(kilograms = kilograms))
+        dao.updateTrace(evidence.trace.copy(updatedAt = now))
+    }
+
+    suspend fun updateSleep(
+        traceId: String,
+        startAt: Instant,
+        endAt: Instant,
+        wasAdjustedByUser: Boolean
+    ) = withContext(Dispatchers.IO) {
+        val evidence = dao.evidenceById(traceId) ?: return@withContext
+        val normalizedEnd = TraceSleepPolicy.normalizedEnd(startAt, endAt)
+        updateSleep(
+            evidence = evidence,
+            startAt = startAt,
+            normalizedEnd = normalizedEnd,
+            wasAdjustedByUser = wasAdjustedByUser,
+            confidence = TraceConfidence.USER_CONFIRMED,
+            now = clock.instant()
+        )
+    }
+
+    suspend fun deleteTrace(traceId: String) = withContext(Dispatchers.IO) {
+        val evidence = dao.evidenceById(traceId) ?: return@withContext
+        val now = clock.instant()
+        dao.updateTrace(evidence.trace.copy(updatedAt = now, deletedAt = now))
+    }
+
     suspend fun setDrinkOnly(traceId: String, drinkOnly: Boolean) = withContext(Dispatchers.IO) {
         val evidence = dao.evidenceById(traceId) ?: return@withContext
         val capture = evidence.foodCapture ?: return@withContext
@@ -190,6 +227,36 @@ class TraceRepository(
             evidence.trace.copy(
                 notes = note?.trim()?.takeIf { it.isNotBlank() },
                 updatedAt = clock.instant()
+            )
+        )
+    }
+
+    private suspend fun updateSleep(
+        evidence: TraceEvidenceEntity,
+        startAt: Instant,
+        normalizedEnd: Instant,
+        wasAdjustedByUser: Boolean,
+        confidence: TraceConfidence,
+        now: Instant
+    ) {
+        val sleep = evidence.sleepSession ?: return
+        dao.updateSleepSession(
+            sleep.copy(
+                startAt = startAt,
+                endAt = normalizedEnd,
+                durationMinutes = TraceSleepPolicy.durationMinutes(startAt, normalizedEnd),
+                sourceLabel = if (confidence == TraceConfidence.ESTIMATED) "Launcher estimate" else null,
+                wasAdjustedByUser = wasAdjustedByUser
+            )
+        )
+        dao.updateTrace(
+            evidence.trace.copy(
+                type = TraceType.SLEEP_SESSION,
+                source = TraceSource.MANUAL,
+                confidence = confidence,
+                occurredAt = startAt,
+                endedAt = normalizedEnd,
+                updatedAt = now
             )
         )
     }

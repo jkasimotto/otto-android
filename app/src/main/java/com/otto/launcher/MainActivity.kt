@@ -1056,7 +1056,19 @@ private fun LauncherScreen(
                     onDismiss = { traceTodayVisible = false },
                     onHide = { traceId, hidden -> traceViewModel.setFoodHidden(traceId, hidden) },
                     onDrinkOnly = { traceId, drinkOnly -> traceViewModel.setDrinkOnly(traceId, drinkOnly) },
-                    onUpdateNote = { traceId, note -> traceViewModel.updateNote(traceId, note) }
+                    onUpdateNote = { traceId, note -> traceViewModel.updateNote(traceId, note) },
+                    onUpdateWeight = { traceId, kilograms ->
+                        traceViewModel.updateWeight(traceId, kilograms)
+                        statusMessage = "${"%.1f".format(kilograms)}kg saved."
+                    },
+                    onUpdateSleep = { traceId, startAt, endAt, adjusted ->
+                        traceViewModel.updateSleep(traceId, startAt, endAt, adjusted)
+                        statusMessage = "Sleep saved."
+                    },
+                    onDelete = { traceId ->
+                        traceViewModel.deleteTrace(traceId)
+                        statusMessage = "Trace deleted."
+                    }
                 )
             }
 
