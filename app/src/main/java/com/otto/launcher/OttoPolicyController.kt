@@ -92,8 +92,7 @@ object OttoPolicyController {
 
     fun shouldHideFromLauncher(packageName: String): Boolean {
         val normalizedPackage = packageName.lowercase()
-        return blockedLauncherPackagePrefixes.any { normalizedPackage.startsWith(it) } ||
-            normalizedPackage in hardBlockedAppPackages
+        return blockedLauncherPackagePrefixes.any { normalizedPackage.startsWith(it) }
     }
 
     fun isDeviceOwner(context: Context): Boolean {

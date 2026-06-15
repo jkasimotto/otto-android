@@ -36,7 +36,9 @@ class TraceRepository(
 ) {
     private val appContext = context.applicationContext
     private val zoneId: ZoneId = ZoneId.systemDefault()
-    private val dao = TraceDatabase.get(appContext).traceDao()
+    private val database = TraceDatabase.get(appContext)
+    private val dao = database.traceDao()
+    private val v2Dao = database.traceV2Dao()
     private val preferences = TracePreferences(appContext)
     private val mediaStore = TraceMediaStore(appContext)
 
@@ -95,6 +97,17 @@ class TraceRepository(
                 sourceLabel = null
             )
         )
+        v2Dao.upsertWeightEntry(
+            WeightEntryEntity(
+                id = traceId,
+                measuredAt = now,
+                kg = kilograms,
+                source = TraceSource.MANUAL.name,
+                healthConnectId = null,
+                createdAt = now,
+                updatedAt = now
+            )
+        )
     }
 
     suspend fun recordSleep(
@@ -134,6 +147,19 @@ class TraceRepository(
                 durationMinutes = TraceSleepPolicy.durationMinutes(startAt, normalizedEnd),
                 sourceLabel = if (confidence == TraceConfidence.ESTIMATED) "Launcher estimate" else null,
                 wasAdjustedByUser = wasAdjustedByUser
+            )
+        )
+        v2Dao.upsertSleepSession(
+            V2SleepSessionEntity(
+                id = traceId,
+                startAt = startAt,
+                endAt = normalizedEnd,
+                source = TraceSource.MANUAL.name,
+                targetStartLocalTime = null,
+                targetWakeLocalTime = null,
+                healthConnectId = null,
+                createdAt = now,
+                updatedAt = now
             )
         )
         preferences.clearSleepEstimate()
@@ -182,6 +208,17 @@ class TraceRepository(
         val now = clock.instant()
         dao.updateWeightMeasurement(weight.copy(kilograms = kilograms))
         dao.updateTrace(evidence.trace.copy(updatedAt = now))
+        v2Dao.upsertWeightEntry(
+            WeightEntryEntity(
+                id = traceId,
+                measuredAt = evidence.trace.occurredAt,
+                kg = kilograms,
+                source = evidence.trace.source.name,
+                healthConnectId = null,
+                createdAt = evidence.trace.createdAt,
+                updatedAt = now
+            )
+        )
     }
 
     suspend fun updateSleep(
@@ -259,6 +296,19 @@ class TraceRepository(
                 updatedAt = now
             )
         )
+        v2Dao.upsertSleepSession(
+            V2SleepSessionEntity(
+                id = evidence.trace.id,
+                startAt = startAt,
+                endAt = normalizedEnd,
+                source = TraceSource.MANUAL.name,
+                targetStartLocalTime = null,
+                targetWakeLocalTime = null,
+                healthConnectId = null,
+                createdAt = evidence.trace.createdAt,
+                updatedAt = now
+            )
+        )
     }
 
     private suspend fun insertPhotoTrace(
@@ -293,6 +343,35 @@ class TraceRepository(
                 hidden = false
             )
         )
+        if (isDrinkOnly) {
+            v2Dao.upsertDrinkEntry(
+                DrinkEntryEntity(
+                    id = traceId,
+                    capturedAt = now,
+                    photoUri = media.localUri,
+                    thumbnailUri = media.thumbnailUri,
+                    amountMl = null,
+                    source = source.name,
+                    createdAt = now,
+                    updatedAt = now
+                )
+            )
+        } else {
+            v2Dao.upsertFoodEntry(
+                FoodEntryEntity(
+                    id = traceId,
+                    capturedAt = now,
+                    photoUri = media.localUri,
+                    thumbnailUri = media.thumbnailUri,
+                    energyKj = null,
+                    mealType = inferredSlot.name,
+                    reviewedAt = null,
+                    source = source.name,
+                    createdAt = now,
+                    updatedAt = now
+                )
+            )
+        }
         if (!isDrinkOnly && inferredSlot != MealSlot.SNACK && inferredSlot != MealSlot.UNKNOWN) {
             preferences.clearMealWindowIgnore(inferredSlot)
         }

@@ -6,11 +6,18 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import com.otto.launcher.domain.policy.AppTier
+import com.otto.launcher.domain.trace.InboxKind
+import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.trace.domain.MealSlot
 import com.otto.launcher.trace.domain.TraceConfidence
 import com.otto.launcher.trace.domain.TraceSource
 import com.otto.launcher.trace.domain.TraceType
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 
 @Database(
     entities = [
@@ -18,14 +25,25 @@ import java.time.Instant
         MediaAssetEntity::class,
         FoodCaptureEntity::class,
         WeightMeasurementEntity::class,
-        SleepSessionEntity::class
+        SleepSessionEntity::class,
+        AppPolicyEntity::class,
+        AppSessionEntity::class,
+        GoalSettingsEntity::class,
+        FoodEntryEntity::class,
+        DrinkEntryEntity::class,
+        WeightEntryEntity::class,
+        V2SleepSessionEntity::class,
+        InboxItemEntity::class,
+        HealthConnectMappingEntity::class,
+        DailyLocalSummaryEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(TraceConverters::class)
 abstract class TraceDatabase : RoomDatabase() {
     abstract fun traceDao(): TraceDao
+    abstract fun traceV2Dao(): TraceV2Dao
 
     companion object {
         @Volatile
@@ -37,7 +55,182 @@ abstract class TraceDatabase : RoomDatabase() {
                     context.applicationContext,
                     TraceDatabase::class.java,
                     "trace.db"
-                ).build().also { instance = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { instance = it }
+            }
+        }
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_policy` (
+                        `packageName` TEXT NOT NULL,
+                        `tier` TEXT NOT NULL,
+                        `hiddenByDefault` INTEGER NOT NULL,
+                        `suspendedByDefault` INTEGER NOT NULL,
+                        `challengeRequired` INTEGER NOT NULL,
+                        `reasonRequired` INTEGER NOT NULL,
+                        `defaultTimeboxMinutes` INTEGER,
+                        `dailyLimitMinutes` INTEGER,
+                        `workWindowJson` TEXT,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`packageName`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_session` (
+                        `id` TEXT NOT NULL,
+                        `packageName` TEXT NOT NULL,
+                        `tier` TEXT NOT NULL,
+                        `startedAt` INTEGER NOT NULL,
+                        `endedAt` INTEGER,
+                        `launchReason` TEXT,
+                        `gateType` TEXT,
+                        `timeboxMinutes` INTEGER,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_app_session_packageName` ON `app_session` (`packageName`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_app_session_startedAt` ON `app_session` (`startedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_app_session_endedAt` ON `app_session` (`endedAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `goal_settings` (
+                        `id` TEXT NOT NULL,
+                        `sleepTargetMinutes` INTEGER NOT NULL,
+                        `sleepTargetStart` TEXT,
+                        `sleepTargetWake` TEXT,
+                        `dailyKjTarget` INTEGER,
+                        `weightGoalKg` REAL,
+                        `dailyScreenLimitMinutes` INTEGER,
+                        `windDownMinutesBeforeSleep` INTEGER NOT NULL,
+                        `hardSleepLock` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `food_entry` (
+                        `id` TEXT NOT NULL,
+                        `capturedAt` INTEGER NOT NULL,
+                        `photoUri` TEXT,
+                        `thumbnailUri` TEXT,
+                        `energyKj` INTEGER,
+                        `mealType` TEXT,
+                        `reviewedAt` INTEGER,
+                        `source` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_food_entry_capturedAt` ON `food_entry` (`capturedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_food_entry_reviewedAt` ON `food_entry` (`reviewedAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `drink_entry` (
+                        `id` TEXT NOT NULL,
+                        `capturedAt` INTEGER NOT NULL,
+                        `photoUri` TEXT,
+                        `thumbnailUri` TEXT,
+                        `amountMl` INTEGER,
+                        `source` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_drink_entry_capturedAt` ON `drink_entry` (`capturedAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `weight_entry` (
+                        `id` TEXT NOT NULL,
+                        `measuredAt` INTEGER NOT NULL,
+                        `kg` REAL NOT NULL,
+                        `source` TEXT NOT NULL,
+                        `healthConnectId` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_weight_entry_measuredAt` ON `weight_entry` (`measuredAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `sleep_session` (
+                        `id` TEXT NOT NULL,
+                        `startAt` INTEGER NOT NULL,
+                        `endAt` INTEGER,
+                        `source` TEXT NOT NULL,
+                        `targetStartLocalTime` TEXT,
+                        `targetWakeLocalTime` TEXT,
+                        `healthConnectId` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sleep_session_startAt` ON `sleep_session` (`startAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sleep_session_endAt` ON `sleep_session` (`endAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `inbox_item` (
+                        `id` TEXT NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `text` TEXT NOT NULL,
+                        `audioUri` TEXT,
+                        `transcriptConfidence` REAL,
+                        `state` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `reviewedAt` INTEGER,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_inbox_item_kind` ON `inbox_item` (`kind`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_inbox_item_state` ON `inbox_item` (`state`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_inbox_item_createdAt` ON `inbox_item` (`createdAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_connect_mapping` (
+                        `localId` TEXT NOT NULL,
+                        `localType` TEXT NOT NULL,
+                        `healthConnectRecordId` TEXT,
+                        `clientRecordVersion` INTEGER NOT NULL,
+                        `lastSyncedAt` INTEGER,
+                        PRIMARY KEY(`localId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_health_connect_mapping_localType` ON `health_connect_mapping` (`localType`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `daily_local_summary` (
+                        `date` TEXT NOT NULL,
+                        `sleepMinutes` INTEGER,
+                        `latestWeightKg` REAL,
+                        `foodPhotoCount` INTEGER NOT NULL,
+                        `foodEnergyKj` INTEGER,
+                        `unresolvedFoodCount` INTEGER NOT NULL,
+                        `totalPhoneMinutes` INTEGER,
+                        `distractingPhoneMinutes` INTEGER,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`date`)
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }
@@ -49,6 +242,18 @@ class TraceConverters {
 
     @TypeConverter
     fun longToInstant(value: Long?): Instant? = value?.let(Instant::ofEpochMilli)
+
+    @TypeConverter
+    fun localTimeToString(value: LocalTime?): String? = value?.toString()
+
+    @TypeConverter
+    fun stringToLocalTime(value: String?): LocalTime? = value?.let(LocalTime::parse)
+
+    @TypeConverter
+    fun localDateToString(value: LocalDate?): String? = value?.toString()
+
+    @TypeConverter
+    fun stringToLocalDate(value: String?): LocalDate? = value?.let(LocalDate::parse)
 
     @TypeConverter
     fun traceTypeToString(value: TraceType?): String? = value?.name
@@ -73,4 +278,22 @@ class TraceConverters {
 
     @TypeConverter
     fun stringToMealSlot(value: String?): MealSlot? = value?.let(MealSlot::valueOf)
+
+    @TypeConverter
+    fun appTierToString(value: AppTier?): String? = value?.name
+
+    @TypeConverter
+    fun stringToAppTier(value: String?): AppTier? = value?.let(AppTier::valueOf)
+
+    @TypeConverter
+    fun inboxKindToString(value: InboxKind?): String? = value?.name
+
+    @TypeConverter
+    fun stringToInboxKind(value: String?): InboxKind? = value?.let(InboxKind::valueOf)
+
+    @TypeConverter
+    fun inboxStateToString(value: InboxState?): String? = value?.name
+
+    @TypeConverter
+    fun stringToInboxState(value: String?): InboxState? = value?.let(InboxState::valueOf)
 }

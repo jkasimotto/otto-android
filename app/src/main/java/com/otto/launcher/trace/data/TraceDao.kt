@@ -61,6 +61,16 @@ abstract class TraceDao {
     @Query(
         """
         SELECT * FROM traces
+        WHERE deletedAt IS NULL
+        ORDER BY occurredAt ASC
+        """
+    )
+    abstract suspend fun evidenceAll(): List<TraceEvidenceEntity>
+
+    @Transaction
+    @Query(
+        """
+        SELECT * FROM traces
         WHERE type = :type
           AND deletedAt IS NULL
         ORDER BY occurredAt DESC

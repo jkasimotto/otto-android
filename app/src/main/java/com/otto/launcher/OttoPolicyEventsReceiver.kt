@@ -3,6 +3,7 @@ package com.otto.launcher
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.otto.launcher.data.policy.PolicyRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ class OttoPolicyEventsReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 OttoPolicyController.applyPolicies(context)
+                PolicyRuntime.applyCurrentPolicy(context)
                 OttoDiagnostics.info(context.applicationContext, "PolicyReceiver", "Policies applied for broadcast: $action")
             } finally {
                 pendingResult.finish()

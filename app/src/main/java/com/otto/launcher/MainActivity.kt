@@ -97,6 +97,29 @@ import com.otto.launcher.trace.ui.TraceTodayDialog
 import com.otto.launcher.trace.ui.TraceViewModel
 import com.otto.launcher.trace.ui.TraceWeeklyDialog
 import com.otto.launcher.trace.ui.TraceWeightDialog
+import com.otto.launcher.domain.command.AppCommandResult
+import com.otto.launcher.domain.command.CommandResult
+import com.otto.launcher.domain.command.MaintenanceSection
+import com.otto.launcher.domain.command.OttoCommand
+import com.otto.launcher.domain.mode.OttoMode
+import com.otto.launcher.domain.policy.AppDescriptor
+import com.otto.launcher.domain.policy.AppGate
+import com.otto.launcher.domain.trace.InboxKind
+import com.otto.launcher.domain.trace.InboxState
+import com.otto.launcher.data.policy.PolicyRuntime
+import com.otto.launcher.device.DeviceOwnerController
+import com.otto.launcher.ui.capture.NoteCaptureSheet
+import com.otto.launcher.ui.capture.SleepStartDialog
+import com.otto.launcher.ui.home.DistractionGateDialog
+import com.otto.launcher.ui.home.FastCaptureAction
+import com.otto.launcher.ui.home.HomeScreenV2
+import com.otto.launcher.ui.home.LauncherViewModel
+import com.otto.launcher.ui.home.LedgerAction
+import com.otto.launcher.ui.review.FoodReviewScreen
+import com.otto.launcher.ui.review.InboxReviewScreen
+import com.otto.launcher.ui.review.TodayScreen
+import com.otto.launcher.ui.review.WeekScreen
+import com.otto.launcher.ui.settings.SettingsHome
 import com.otto.launcher.ui.theme.OttoLauncherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -147,10 +170,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    LauncherScreen(
-                        apps = launcherApps,
-                        versionLabel = versionLabel
-                    )
+                    LauncherScreen(apps = launcherApps)
                 }
             }
         }
@@ -163,6 +183,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 OttoPolicyController.applyPolicies(this@MainActivity)
+                PolicyRuntime.applyCurrentPolicy(this@MainActivity)
             }
             OttoPolicyController.startWebsiteVpnIfNeeded(this@MainActivity)
             OttoPolicyController.syncLockTaskMode(this@MainActivity)
@@ -185,8 +206,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun LauncherScreen(
-    apps: List<AppInfo>,
-    versionLabel: String
+    apps: List<AppInfo>
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -197,7 +217,9 @@ private fun LauncherScreen(
     }
     val voiceAgent = remember { VoiceLaunchAgent() }
     val traceViewModel: TraceViewModel = viewModel()
+    val launcherViewModel: LauncherViewModel = viewModel()
     val traceState by traceViewModel.uiState.collectAsState()
+    val homeState by launcherViewModel.uiState.collectAsState()
     var tapCount by remember { mutableStateOf(0) }
     var tapTimeoutJob by remember { mutableStateOf<Job?>(null) }
     var lastTapTimestamp by remember { mutableStateOf(0L) }
@@ -209,9 +231,12 @@ private fun LauncherScreen(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var pendingPermissionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var isVoiceMode by remember { mutableStateOf(false) }
+    var voiceCaptureKind by remember { mutableStateOf<InboxKind?>(null) }
     var gatedLaunchApp by remember { mutableStateOf<AppInfo?>(null) }
+    var gatedDistractionApp by remember { mutableStateOf<AppCommandResult?>(null) }
     var launchGateInput by rememberSaveable { mutableStateOf("") }
     var launchGateCode by rememberSaveable { mutableStateOf("") }
+    var launchGateReason by rememberSaveable { mutableStateOf("") }
     var launchGateError by remember { mutableStateOf<String?>(null) }
     var isUpdating by remember { mutableStateOf(false) }
     var manualProcessingActive by remember { mutableStateOf(false) }
@@ -223,9 +248,6 @@ private fun LauncherScreen(
 
     // Secret notes gesture state: 7-tap version, wait 3s, 7-tap again
     var secretTapPhase by remember { mutableStateOf(0) } // 0=idle, 1=first-7-done, 2=passkey-prompt, 3=unlocked
-    var secretTapCount by remember { mutableStateOf(0) }
-    var secretLastTapTime by remember { mutableStateOf(0L) }
-    var secretPhaseOneTime by remember { mutableStateOf(0L) }
     var secretPasskeyInput by rememberSaveable { mutableStateOf("") }
     var secretPasskeyError by remember { mutableStateOf<String?>(null) }
     var secretNotesText by rememberSaveable { mutableStateOf("") }
@@ -240,6 +262,13 @@ private fun LauncherScreen(
     var traceTodayVisible by remember { mutableStateOf(false) }
     var traceWeeklyVisible by remember { mutableStateOf(false) }
     var traceSettingsVisible by remember { mutableStateOf(false) }
+    var noteCaptureVisible by remember { mutableStateOf(false) }
+    var sleepStartVisible by remember { mutableStateOf(false) }
+    var foodReviewVisible by remember { mutableStateOf(false) }
+    var inboxReviewVisible by remember { mutableStateOf(false) }
+    var todayV2Visible by remember { mutableStateOf(false) }
+    var weekV2Visible by remember { mutableStateOf(false) }
+    var maintenanceSection by remember { mutableStateOf<MaintenanceSection?>(null) }
     var traceCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
     var pendingCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
     var pendingImportDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
@@ -306,6 +335,7 @@ private fun LauncherScreen(
             statusMessage = "Microphone permission is required for voice search."
             voiceHudVisible = false
             isVoiceMode = false
+            voiceCaptureKind = null
         }
     }
 
@@ -328,7 +358,7 @@ private fun LauncherScreen(
         pendingImportDrinkOnly = null
         uri?.let {
             traceViewModel.importPhoto(it, drinkOnly)
-            statusMessage = if (drinkOnly) "Drink photo imported." else "Food photo imported."
+            statusMessage = if (drinkOnly) "Drink saved." else "Food saved. Review later."
         }
     }
 
@@ -348,19 +378,21 @@ private fun LauncherScreen(
     }
 
     val normalizedQuery = remember(query) { query.trim() }
-    val filteredApps = remember(normalizedQuery, apps, isVoiceMode) {
-        val normalized = normalizedQuery.lowercase(Locale.getDefault())
-        when {
-            normalized.isBlank() -> emptyList()
-            isVoiceMode -> fuzzyMatchApps(apps, normalized)
-            normalized.length < 3 -> emptyList()
-            else -> apps.filter { info ->
-                info.label.contains(normalized, ignoreCase = true) ||
-                    info.packageName.contains(normalized, ignoreCase = true)
-            }
+    val appDescriptors = remember(apps) {
+        apps.map { app ->
+            AppDescriptor(
+                label = app.label,
+                packageName = app.packageName,
+                activityName = app.activityName
+            )
         }
     }
-
+    LaunchedEffect(appDescriptors) {
+        launcherViewModel.seedApps(appDescriptors)
+    }
+    val commandResult = remember(normalizedQuery, appDescriptors, homeState.policies) {
+        launcherViewModel.resolveCommand(normalizedQuery, appDescriptors)
+    }
     fun handleVoiceResult(cleaned: String) {
         isVoiceMode = true
         query = cleaned
@@ -383,17 +415,19 @@ private fun LauncherScreen(
         }
     }
 
-    fun startVoiceRecording() {
+    fun startVoiceRecording(captureKind: InboxKind? = null) {
         val start = {
             val result = voiceManager.startRecording()
             if (result) {
+                voiceCaptureKind = captureKind
                 voiceHudVisible = true
-                statusMessage = "Listening..."
+                statusMessage = if (captureKind == null) "Listening..." else "Listening..."
                 isRecording = true
             } else {
                 statusMessage = "Unable to access microphone."
                 voiceHudVisible = false
                 isVoiceMode = false
+                voiceCaptureKind = null
             }
         }
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -425,6 +459,143 @@ private fun LauncherScreen(
         )
     }
 
+    fun findAppInfo(result: AppCommandResult): AppInfo? {
+        return apps.firstOrNull {
+            it.packageName == result.packageName && it.activityName == result.activityName
+        } ?: apps.firstOrNull { it.packageName == result.packageName }
+    }
+
+    fun startOttoUpdate() {
+        if (isUpdating) return
+        isUpdating = true
+        statusMessage = "Checking for Otto updates..."
+        scope.launch {
+            val result = OttoUpdater.downloadLatestRelease(context)
+            isUpdating = false
+            result
+                .onSuccess { apkFile ->
+                    triggerProcessingOverlay("INSTALLING")
+                    statusMessage = "Installing update..."
+                    context.installApk(apkFile)
+                }
+                .onFailure { error ->
+                    statusMessage = error.message ?: "Update failed."
+                }
+        }
+    }
+
+    fun applyV2PolicyNow() {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                OttoPolicyController.markPolicyDirty(packageStateChanged = true)
+                OttoPolicyController.applyPolicies(context, force = true)
+                PolicyRuntime.applyCurrentPolicy(context)
+            }
+        }
+    }
+
+    fun openMaintenance(section: MaintenanceSection) {
+        when (section) {
+            MaintenanceSection.SETTINGS -> maintenanceSection = section
+            MaintenanceSection.LOGS -> {
+                refreshDiagnostics()
+                diagnosticsVisible = true
+            }
+            MaintenanceSection.UPDATE -> startOttoUpdate()
+        }
+    }
+
+    fun handleAppResult(result: AppCommandResult) {
+        when (val gate = result.gate) {
+            AppGate.Allowed -> {
+                val app = findAppInfo(result)
+                if (app != null) {
+                    context.launchApp(app)
+                    statusMessage = "Opening ${app.label}"
+                    query = ""
+                } else {
+                    statusMessage = "Unable to launch ${result.label}."
+                }
+            }
+            AppGate.AdminHidden -> {
+                openMaintenance(MaintenanceSection.SETTINGS)
+                query = ""
+            }
+            AppGate.Blocked -> {
+                statusMessage = "blocked by Shield"
+            }
+            is AppGate.WorkWindowClosed -> {
+                statusMessage = "available ${gate.label}"
+            }
+            is AppGate.Distraction -> {
+                gatedDistractionApp = result
+                launchGateCode = newDistractionGateCode()
+                launchGateInput = ""
+                launchGateReason = ""
+                launchGateError = null
+            }
+        }
+    }
+
+    fun executeCommand(command: OttoCommand) {
+        when (command) {
+            OttoCommand.CaptureFood -> openTraceCamera(isDrinkOnly = false)
+            is OttoCommand.CaptureFoodWithEnergy -> {
+                launcherViewModel.recordManualFoodEnergy(command.kJ)
+                statusMessage = "Food saved. Review later."
+            }
+            OttoCommand.CaptureDrink -> openTraceCamera(isDrinkOnly = true)
+            is OttoCommand.SaveWeight -> {
+                if (command.kg in 20.0..300.0) {
+                    traceViewModel.recordWeight(command.kg)
+                    statusMessage = "Weight saved."
+                } else {
+                    statusMessage = "Weight not saved."
+                }
+            }
+            OttoCommand.StartSleep -> sleepStartVisible = true
+            OttoCommand.EndSleep -> {
+                launcherViewModel.endSleep { minutes ->
+                    statusMessage = minutes?.let { "Sleep saved: ${formatMinutesHuman(it)}" } ?: "Sleep saved."
+                    applyV2PolicyNow()
+                }
+            }
+            is OttoCommand.SaveNote -> {
+                launcherViewModel.saveNote(command.text)
+                statusMessage = "Note saved."
+            }
+            is OttoCommand.SaveTask -> {
+                launcherViewModel.saveTask(command.text)
+                statusMessage = "Task saved."
+            }
+            OttoCommand.OpenToday -> todayV2Visible = true
+            OttoCommand.OpenReview -> foodReviewVisible = true
+            OttoCommand.OpenWeek -> weekV2Visible = true
+            is OttoCommand.SetMode -> {
+                launcherViewModel.setMode(command.mode)
+                statusMessage = if (command.mode == OttoMode.FOCUS) "Focus mode" else "Open mode"
+            }
+            is OttoCommand.LaunchApp -> {
+                apps.firstOrNull { it.packageName == command.packageName }?.let(context::launchApp)
+            }
+            is OttoCommand.ExplainBlockedApp -> {
+                statusMessage = "blocked by Shield"
+            }
+            is OttoCommand.OpenMaintenance -> openMaintenance(command.section)
+        }
+        query = ""
+    }
+
+    fun submitCommand() {
+        when (val result = launcherViewModel.resolveCommand(query, appDescriptors)) {
+            is CommandResult.BuiltIn -> executeCommand(result.command)
+            is CommandResult.AppResults -> result.results.firstOrNull()?.let(::handleAppResult)
+                ?: run { statusMessage = "No result." }
+            CommandResult.Empty -> Unit
+            CommandResult.NoResult -> statusMessage = "No result."
+        }
+    }
+
     fun handleTracePrimaryAction() {
         traceCaptureSheetVisible = true
     }
@@ -441,23 +612,40 @@ private fun LauncherScreen(
         isTranscribing = true
         statusMessage = "Transcribing..."
         scope.launch {
+            val captureKind = voiceCaptureKind
             val result = voiceManager.transcribe(file)
             isTranscribing = false
             result
                 .onSuccess { text ->
                     val cleaned = text.trim()
                     if (cleaned.isNotEmpty()) {
-                        handleVoiceResult(cleaned)
+                        if (captureKind == InboxKind.NOTE) {
+                            launcherViewModel.saveNote(cleaned)
+                            statusMessage = "Note saved."
+                            voiceHudVisible = false
+                            isVoiceMode = false
+                            voiceCaptureKind = null
+                        } else if (captureKind == InboxKind.TASK) {
+                            launcherViewModel.saveTask(cleaned)
+                            statusMessage = "Task saved."
+                            voiceHudVisible = false
+                            isVoiceMode = false
+                            voiceCaptureKind = null
+                        } else {
+                            handleVoiceResult(cleaned)
+                        }
                     } else {
                         statusMessage = "Didn't catch that."
                         voiceHudVisible = false
                         isVoiceMode = false
+                        voiceCaptureKind = null
                     }
                 }
                 .onFailure { error ->
                     statusMessage = error.message ?: "Transcription failed."
                     voiceHudVisible = false
                     isVoiceMode = false
+                    voiceCaptureKind = null
                 }
         }
     }
@@ -472,7 +660,6 @@ private fun LauncherScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 32.dp)
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
@@ -499,171 +686,76 @@ private fun LauncherScreen(
                     )
                 }
         ) {
-            QuickActionRow(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .navigationBarsPadding(),
-                onOpenSettings = { context.openSystemSettings() },
-                greyscaleEnabled = greyscaleEnabled,
-                onToggleGreyscale = {
-                    val targetEnabled = !context.isGreyscaleEnabled()
-                    if (context.setGreyscaleEnabled(targetEnabled)) {
-                        greyscaleEnabled = context.isGreyscaleEnabled()
-                        statusMessage = if (greyscaleEnabled) "Greyscale on." else "Greyscale off."
-                    } else {
-                        greyscaleEnabled = context.isGreyscaleEnabled()
-                        val openedSettings = context.openGreyscaleSettings()
-                        statusMessage = if (openedSettings) {
-                            "Open Color correction to switch greyscale."
-                        } else {
-                            "Unable to change greyscale."
-                        }
-                    }
-                },
-                onOpenLogs = {
-                    refreshDiagnostics()
-                    diagnosticsVisible = true
-                },
-                onUpdate = {
-                    if (isUpdating) return@QuickActionRow
-                    isUpdating = true
-                    statusMessage = "Checking for Otto updates..."
-                    scope.launch {
-                        val result = OttoUpdater.downloadLatestRelease(context)
-                        isUpdating = false
-                        result
-                            .onSuccess { apkFile ->
-                                triggerProcessingOverlay("INSTALLING")
-                                statusMessage = "Installing update..."
-                                context.installApk(apkFile)
-                            }
-                            .onFailure { error ->
-                                statusMessage = error.message ?: "Update failed."
-                            }
-                    }
-                }
-            )
-
-            if (normalizedQuery.isBlank()) {
-                TraceHomeLayer(
-                    state = traceState,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(top = 86.dp),
-                    onOpenToday = { traceTodayVisible = true },
-                    onOpenWeekly = { traceWeeklyVisible = true }
-                )
-            }
-
-            if (filteredApps.isNotEmpty()) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 40.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 0.dp)
-                ) {
-                    items(
-                        items = filteredApps,
-                        key = { it.activityName }
-                    ) { app ->
-                        AppRow(
-                            appInfo = app,
-                            onLaunch = { attemptLaunch(it) },
-                            onLongPress = { context.openAppInfo(it) }
-                        )
-                    }
-                }
-            }
-
-            MinimalSearchField(
+            HomeScreenV2(
+                state = homeState,
+                commandResult = commandResult,
                 query = query,
+                statusMessage = statusMessage,
                 onQueryChange = {
                     query = it
-                    if (it.isNotEmpty()) {
-                        statusMessage = null
-                    }
+                    if (it.isNotEmpty()) statusMessage = null
                     isVoiceMode = false
                 },
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding()
-            )
-
-            Text(
-                text = versionLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = {
-                                val now = SystemClock.elapsedRealtime()
-                                // Reset if tap gap > 600ms
-                                if (now - secretLastTapTime > 600) {
-                                    // Check if we're in phase 1 waiting period and this is a new burst
-                                    if (secretTapPhase == 1) {
-                                        val elapsed = now - secretPhaseOneTime
-                                        if (elapsed in 2500..5000) {
-                                            // Valid wait window (2.5s - 5s), start second burst
-                                            secretTapCount = 1
-                                            secretLastTapTime = now
-                                            return@detectTapGestures
-                                        } else {
-                                            // Outside window, reset everything
-                                            secretTapPhase = 0
-                                            secretTapCount = 0
-                                        }
-                                    } else {
-                                        secretTapCount = 0
-                                    }
+                onSubmitCommand = { submitCommand() },
+                onFastCapture = { action ->
+                    when (action) {
+                        FastCaptureAction.FOOD -> openTraceCamera(isDrinkOnly = false)
+                        FastCaptureAction.WEIGHT -> traceWeightVisible = true
+                        FastCaptureAction.SLEEP -> {
+                            if (homeState.mode == OttoMode.SLEEP) {
+                                launcherViewModel.endSleep { minutes ->
+                                    statusMessage = minutes?.let { "Sleep saved: ${formatMinutesHuman(it)}" } ?: "Sleep saved."
+                                    applyV2PolicyNow()
                                 }
-                                secretTapCount += 1
-                                secretLastTapTime = now
-
-                                when (secretTapPhase) {
-                                    0 -> {
-                                        if (secretTapCount >= 7) {
-                                            secretTapPhase = 1
-                                            secretPhaseOneTime = now
-                                            secretTapCount = 0
-                                        }
-                                    }
-                                    1 -> {
-                                        if (secretTapCount >= 7) {
-                                            // Both bursts complete — open passkey prompt
-                                            secretTapPhase = 2
-                                            secretTapCount = 0
-                                            secretPasskeyInput = ""
-                                            secretPasskeyError = null
-                                            secretIsNewPasskey = !SecretNoteStore.isPasskeySet(context)
-                                            secretConfirmPasskey = ""
-                                        }
-                                    }
-                                }
-                            },
-                            onLongPress = {
-                                triggerProcessingOverlay()
-                                statusMessage = "Processing field engaged."
+                            } else {
+                                sleepStartVisible = true
                             }
-                        )
+                        }
+                        FastCaptureAction.NOTE -> noteCaptureVisible = true
                     }
-                    .padding(vertical = 6.dp)
+                },
+                onFastCaptureLongPress = { action ->
+                    if (action == FastCaptureAction.NOTE) {
+                        startVoiceRecording(InboxKind.NOTE)
+                    }
+                },
+                onLedgerAction = { action ->
+                    when (action) {
+                        LedgerAction.SLEEP -> {
+                            if (homeState.mode == OttoMode.SLEEP) {
+                                launcherViewModel.endSleep { minutes ->
+                                    statusMessage = minutes?.let { "Sleep saved: ${formatMinutesHuman(it)}" } ?: "Sleep saved."
+                                    applyV2PolicyNow()
+                                }
+                            } else {
+                                sleepStartVisible = true
+                            }
+                        }
+                        LedgerAction.WEIGHT -> traceWeightVisible = true
+                        LedgerAction.FOOD -> foodReviewVisible = true
+                        LedgerAction.PHONE -> launcherViewModel.openUsageAccessSettings()
+                    }
+                },
+                onAppResult = { handleAppResult(it) },
+                onAppLongPress = { result ->
+                    findAppInfo(result)?.let { context.openAppInfo(it) }
+                },
+                onOttoLongPress = { openMaintenance(MaintenanceSection.SETTINGS) },
+                onWake = {
+                    launcherViewModel.endSleep { minutes ->
+                        statusMessage = minutes?.let { "Sleep saved: ${formatMinutesHuman(it)}" } ?: "Sleep saved."
+                        applyV2PolicyNow()
+                    }
+                },
+                onEmergency = {
+                    launcherViewModel.endSleep {
+                        statusMessage = "Sleep saved."
+                        applyV2PolicyNow()
+                    }
+                    context.openSystemSettings()
+                },
+                modifier = Modifier.fillMaxSize()
             )
-
-            statusMessage?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 36.dp)
-                )
-            }
 
             if (voiceHudVisible || isRecording || isTranscribing) {
                 VoiceControlChip(
@@ -677,6 +769,37 @@ private fun LauncherScreen(
                         if (isRecording) {
                             stopRecordingAndTranscribe()
                         }
+                    }
+                )
+            }
+
+            gatedDistractionApp?.let { app ->
+                DistractionGateDialog(
+                    app = app,
+                    challengeCode = launchGateCode,
+                    onDismiss = {
+                        gatedDistractionApp = null
+                        launchGateInput = ""
+                        launchGateReason = ""
+                        launchGateCode = ""
+                        launchGateError = null
+                    },
+                    onOpen = { reason, timeboxMinutes ->
+                        launcherViewModel.recordDistractionSession(
+                            packageName = app.packageName,
+                            reason = reason,
+                            timeboxMinutes = timeboxMinutes
+                        )
+                        DeviceOwnerController(context).hidePackage(app.packageName, false)
+                        DeviceOwnerController(context).suspendPackages(listOf(app.packageName), false)
+                        findAppInfo(app)?.let { context.launchApp(it) }
+                        gatedDistractionApp = null
+                        launchGateInput = ""
+                        launchGateReason = ""
+                        launchGateCode = ""
+                        launchGateError = null
+                        query = ""
+                        statusMessage = "Opening ${app.label}"
                     }
                 )
             }
@@ -988,6 +1111,78 @@ private fun LauncherScreen(
                 )
             }
 
+            if (noteCaptureVisible) {
+                NoteCaptureSheet(
+                    onDismiss = { noteCaptureVisible = false },
+                    onSaveNote = {
+                        launcherViewModel.saveNote(it)
+                        statusMessage = "Note saved."
+                    }
+                )
+            }
+
+            if (sleepStartVisible) {
+                SleepStartDialog(
+                    onDismiss = { sleepStartVisible = false },
+                    onStartSleep = {
+                        launcherViewModel.startSleep {
+                            applyV2PolicyNow()
+                        }
+                        statusMessage = "Sleep mode"
+                    }
+                )
+            }
+
+            if (foodReviewVisible) {
+                FoodReviewScreen(
+                    entries = homeState.unresolvedFood,
+                    onDismiss = { foodReviewVisible = false },
+                    onSetEnergy = { id, energy ->
+                        launcherViewModel.updateFoodEnergy(id, energy)
+                        statusMessage = if (energy == null) "Saved." else "Saved."
+                    }
+                )
+            }
+
+            if (inboxReviewVisible) {
+                InboxReviewScreen(
+                    items = homeState.inbox,
+                    onDismiss = { inboxReviewVisible = false },
+                    onState = { id, state -> launcherViewModel.updateInboxState(id, state) }
+                )
+            }
+
+            if (todayV2Visible) {
+                TodayScreen(
+                    state = homeState,
+                    onDismiss = { todayV2Visible = false }
+                )
+            }
+
+            if (weekV2Visible) {
+                WeekScreen(
+                    state = traceState,
+                    onDismiss = { weekV2Visible = false }
+                )
+            }
+
+            maintenanceSection?.let { section ->
+                SettingsHome(
+                    section = when (section) {
+                        MaintenanceSection.SETTINGS -> "Settings"
+                        MaintenanceSection.LOGS -> "Logs"
+                        MaintenanceSection.UPDATE -> "Update"
+                    },
+                    onDismiss = { maintenanceSection = null },
+                    onOpenSystemSettings = { context.openSystemSettings() },
+                    onOpenLogs = {
+                        refreshDiagnostics()
+                        diagnosticsVisible = true
+                    },
+                    onUpdate = { startOttoUpdate() }
+                )
+            }
+
             if (traceCaptureSheetVisible) {
                 TraceCaptureSheet(
                     state = traceState,
@@ -1038,7 +1233,7 @@ private fun LauncherScreen(
                     onDismiss = { traceWeightVisible = false },
                     onSave = {
                         traceViewModel.recordWeight(it)
-                        statusMessage = "${"%.1f".format(it)}kg saved."
+                        statusMessage = "Weight saved."
                     }
                 )
             }
@@ -1063,7 +1258,7 @@ private fun LauncherScreen(
                     onUpdateNote = { traceId, note -> traceViewModel.updateNote(traceId, note) },
                     onUpdateWeight = { traceId, kilograms ->
                         traceViewModel.updateWeight(traceId, kilograms)
-                        statusMessage = "${"%.1f".format(kilograms)}kg saved."
+                        statusMessage = "Weight saved."
                     },
                     onUpdateSleep = { traceId, startAt, endAt, adjusted ->
                         traceViewModel.updateSleep(traceId, startAt, endAt, adjusted)
@@ -1093,13 +1288,13 @@ private fun LauncherScreen(
         }
 
         traceCameraDrinkOnly?.let { drinkOnly ->
-            TraceCameraOverlay(
+                TraceCameraOverlay(
                 isDrinkOnly = drinkOnly,
                 createOutputFile = { traceViewModel.createCameraImageFile() },
                 onCaptured = { file ->
                     traceViewModel.recordCameraPhoto(file, drinkOnly)
                     traceCameraDrinkOnly = null
-                    statusMessage = if (drinkOnly) "Drink photo saved." else "Food photo saved."
+                    statusMessage = if (drinkOnly) "Drink saved." else "Food saved. Review later."
                 },
                 onCancel = { traceCameraDrinkOnly = null },
                 onError = { statusMessage = it }
@@ -1425,11 +1620,6 @@ private fun shouldDisplayApp(packageManager: PackageManager, appInfo: AppInfo): 
 }
 
 private fun Context.launchApp(appInfo: AppInfo) {
-    if (OttoPolicyController.isBlockedApp(appInfo.packageName)) {
-        Toast.makeText(this, "${appInfo.label} is blocked.", Toast.LENGTH_SHORT).show()
-        return
-    }
-
     val launchIntent = Intent(Intent.ACTION_MAIN).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)
         setClassName(appInfo.packageName, appInfo.activityName)
@@ -1682,6 +1872,20 @@ private fun levenshteinDistance(a: String, b: String): Int {
         }
     }
     return previous[b.length]
+}
+
+private fun newDistractionGateCode(): String {
+    val random = SecureRandom()
+    return buildString(DISTRACTION_GATE_CODE_LENGTH) {
+        repeat(DISTRACTION_GATE_CODE_LENGTH) {
+            append(DISTRACTION_GATE_ALPHABET[random.nextInt(DISTRACTION_GATE_ALPHABET.length)])
+        }
+    }
+}
+
+private fun formatMinutesHuman(minutes: Int): String {
+    val safe = minutes.coerceAtLeast(0)
+    return "${safe / 60}h %02dm".format(safe % 60)
 }
 
 private class VoiceTranscriptionManager(private val context: Context) {
@@ -2046,6 +2250,8 @@ private val ALLOWED_SYSTEM_LABEL_KEYWORDS = listOf("settings", "maps", "phone", 
 
 private const val TRIPLE_TAP_WINDOW_MS = 400L
 private const val TRIPLE_TAP_APP_LABEL = "Pad"
+private const val DISTRACTION_GATE_CODE_LENGTH = 15
+private const val DISTRACTION_GATE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 private const val PROCESSING_OVERLAY_DURATION_MS = 4200L
 private const val SETTING_DISPLAY_DALTONIZER_ENABLED = "accessibility_display_daltonizer_enabled"
 private const val SETTING_DISPLAY_DALTONIZER = "accessibility_display_daltonizer"
