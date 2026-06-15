@@ -7,8 +7,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.PackageManager.NameNotFoundException
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.SystemClock
@@ -23,12 +25,17 @@ object OttoPolicyController {
     private const val PREFS_NAME = "otto_policy_controller"
     private const val KEY_LAST_HARD_BLOCKED_APPS = "last_hard_blocked_apps"
     private const val KEY_LAST_APPLIED_INSTALLED_BLOCKED_APPS = "last_applied_installed_blocked_apps"
-    private const val KEY_SLACK_UNLOCKED_UNTIL = "slack_unlocked_until"
-    private const val KEY_LAST_SLACK_SUSPENDED = "last_slack_suspended"
+    private const val KEY_LEGACY_SLACK_UNLOCKED_UNTIL = "slack_unlocked_until"
+    private const val KEY_LAST_TIME_GATED_SUSPENDED_PACKAGES = "last_time_gated_suspended_packages"
+    private const val KEY_TIME_GATE_UNLOCKED_UNTIL_PREFIX = "time_gate_unlocked_until_"
     private const val LOCK_TASK_FEATURE_QUICK_SETTINGS = 1 shl 7
     private const val AUTO_ENTER_LOCK_TASK = false
     private const val POLICY_REAPPLY_MIN_INTERVAL_MS = 5_000L
     private const val LAUNCH_GATE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    private const val LAUNCH_GATE_CODE_LENGTH = 30
+    private const val TIME_GATE_START_HOUR_INCLUSIVE = 9
+    private const val TIME_GATE_END_HOUR_EXCLUSIVE = 17
+    private const val TIME_GATE_UNLOCK_DURATION_MS = 15 * 60 * 1000L
 
     private val policyApplyLock = Any()
     private val launchGateRandom = SecureRandom()
@@ -73,10 +80,10 @@ object OttoPolicyController {
     private val slackGateRule = TimeGateRule(
         packageName = "com.Slack",
         label = "Slack",
-        startHourInclusive = 9,
-        endHourExclusive = 17,
-        challengeCodeLength = 15,
-        temporaryUnlockDurationMs = 15 * 60 * 1000L
+        startHourInclusive = TIME_GATE_START_HOUR_INCLUSIVE,
+        endHourExclusive = TIME_GATE_END_HOUR_EXCLUSIVE,
+        challengeCodeLength = LAUNCH_GATE_CODE_LENGTH,
+        temporaryUnlockDurationMs = TIME_GATE_UNLOCK_DURATION_MS
     )
 
     fun isBlockedApp(packageName: String): Boolean {
@@ -143,14 +150,15 @@ object OttoPolicyController {
                 (previousBlockedApps - currentBlockedApps) +
                     (previousAppliedInstalledBlockedApps - installedBlockedApps)
                 ).distinct()
-            val isSlackInstalled = isPackageInstalled(packageManager, slackGateRule.packageName)
-            val shouldSuspendSlack = isSlackInstalled && shouldSuspendTimeGatedPackage(appContext, slackGateRule)
-            val hasSlackSuspendedState = prefs.contains(KEY_LAST_SLACK_SUSPENDED)
-            val previousSlackSuspended = if (hasSlackSuspendedState) {
-                prefs.getBoolean(KEY_LAST_SLACK_SUSPENDED, false)
-            } else {
-                null
-            }
+            val timeGateRules = installedTimeGateRules(appContext)
+                .filterNot { isBlockedApp(it.packageName) }
+            val currentTimeGatedPackages = timeGateRules
+                .map { packageKey(it.packageName) }
+                .toSet()
+            val previousTimeGatedSuspendedPackages = prefs
+                .getStringSet(KEY_LAST_TIME_GATED_SUSPENDED_PACKAGES, emptySet())
+                .orEmpty()
+            val currentTimeGatedSuspendedPackages = mutableSetOf<String>()
 
             packagesToUnblock.forEach { packageName ->
                 clearPackageState(dpm, admin, packageManager, packageName, clearHidden = true)
@@ -166,40 +174,34 @@ object OttoPolicyController {
                     dpm.setPackagesSuspended(admin, packagesToBlock.toTypedArray(), true)
                 }
             }
-            if (isSlackInstalled) {
-                when {
-                    previousSlackSuspended == null -> {
-                        clearPackageState(
-                            dpm = dpm,
-                            admin = admin,
-                            packageManager = packageManager,
-                            packageName = slackGateRule.packageName,
-                            clearHidden = false
-                        )
-                        if (shouldSuspendSlack) {
-                            runCatching {
-                                dpm.setPackagesSuspended(admin, arrayOf(slackGateRule.packageName), true)
-                            }
-                        }
+            timeGateRules.forEach { rule ->
+                if (shouldSuspendTimeGatedPackage(appContext, rule)) {
+                    runCatching {
+                        dpm.setPackagesSuspended(admin, arrayOf(rule.packageName), true)
+                    }.onSuccess {
+                        currentTimeGatedSuspendedPackages += rule.packageName
                     }
-
-                    previousSlackSuspended != shouldSuspendSlack -> {
-                        if (shouldSuspendSlack) {
-                            runCatching {
-                                dpm.setPackagesSuspended(admin, arrayOf(slackGateRule.packageName), true)
-                            }
-                        } else {
-                            clearPackageState(
-                                dpm = dpm,
-                                admin = admin,
-                                packageManager = packageManager,
-                                packageName = slackGateRule.packageName,
-                                clearHidden = false
-                            )
-                        }
-                    }
+                } else {
+                    clearPackageState(
+                        dpm = dpm,
+                        admin = admin,
+                        packageManager = packageManager,
+                        packageName = rule.packageName,
+                        clearHidden = false
+                    )
                 }
             }
+            previousTimeGatedSuspendedPackages
+                .filter { packageKey(it) !in currentTimeGatedPackages }
+                .forEach { packageName ->
+                    clearPackageState(
+                        dpm = dpm,
+                        admin = admin,
+                        packageManager = packageManager,
+                        packageName = packageName,
+                        clearHidden = false
+                    )
+                }
 
             val userControlDisabledPackages = (installedBlockedApps + appContext.packageName)
                 .distinct()
@@ -221,7 +223,7 @@ object OttoPolicyController {
             prefs.edit()
                 .putStringSet(KEY_LAST_HARD_BLOCKED_APPS, currentBlockedApps)
                 .putStringSet(KEY_LAST_APPLIED_INSTALLED_BLOCKED_APPS, installedBlockedApps)
-                .putBoolean(KEY_LAST_SLACK_SUSPENDED, isSlackInstalled && shouldSuspendSlack)
+                .putStringSet(KEY_LAST_TIME_GATED_SUSPENDED_PACKAGES, currentTimeGatedSuspendedPackages)
                 .apply()
 
             policyStateDirty = false
@@ -230,13 +232,13 @@ object OttoPolicyController {
     }
 
     fun requiresLaunchGateCode(context: Context, packageName: String): Boolean {
-        val rule = timeGateRuleFor(packageName) ?: return false
+        val rule = timeGateRuleFor(context.applicationContext, packageName) ?: return false
         if (!isPackageInstalled(context.packageManager, rule.packageName)) return false
         return shouldSuspendTimeGatedPackage(context.applicationContext, rule)
     }
 
-    fun newLaunchGateCode(packageName: String): String? {
-        val rule = timeGateRuleFor(packageName) ?: return null
+    fun newLaunchGateCode(context: Context, packageName: String): String? {
+        val rule = timeGateRuleFor(context.applicationContext, packageName) ?: return null
         return buildString(rule.challengeCodeLength) {
             repeat(rule.challengeCodeLength) {
                 append(LAUNCH_GATE_ALPHABET[launchGateRandom.nextInt(LAUNCH_GATE_ALPHABET.length)])
@@ -260,30 +262,31 @@ object OttoPolicyController {
         attemptedCode: String,
         expectedCode: String
     ): Boolean {
-        val rule = timeGateRuleFor(packageName) ?: return false
+        val appContext = context.applicationContext
+        val rule = timeGateRuleFor(appContext, packageName) ?: return false
         val normalizedExpectedCode = normalizeLaunchGateCode(expectedCode)
         if (normalizedExpectedCode.length != rule.challengeCodeLength) return false
         if (normalizeLaunchGateCode(attemptedCode) != normalizedExpectedCode) return false
 
-        context.applicationContext
+        appContext
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putLong(KEY_SLACK_UNLOCKED_UNTIL, System.currentTimeMillis() + rule.temporaryUnlockDurationMs)
+            .putLong(unlockKeyFor(rule.packageName), System.currentTimeMillis() + rule.temporaryUnlockDurationMs)
             .apply()
 
         markPolicyDirty()
-        applyPolicies(context.applicationContext)
+        applyPolicies(appContext)
         return true
     }
 
-    fun launchGatePrompt(packageName: String): String? {
-        return timeGateRuleFor(packageName)?.let {
+    fun launchGatePrompt(context: Context, packageName: String): String? {
+        return timeGateRuleFor(context.applicationContext, packageName)?.let {
             "Type the ${it.challengeCodeLength}-letter code to open ${it.label} outside weekday 9am to 5pm."
         }
     }
 
-    fun launchGateFailureMessage(packageName: String): String? {
-        return timeGateRuleFor(packageName)?.let {
+    fun launchGateFailureMessage(context: Context, packageName: String): String? {
+        return timeGateRuleFor(context.applicationContext, packageName)?.let {
             "Incorrect code for ${it.label}."
         }
     }
@@ -454,9 +457,12 @@ object OttoPolicyController {
         }.getOrDefault(false)
     }
 
-    private fun timeGateRuleFor(packageName: String): TimeGateRule? {
+    private fun timeGateRuleFor(context: Context, packageName: String): TimeGateRule? {
+        val packageManager = context.packageManager
         return if (packageName.equals(slackGateRule.packageName, ignoreCase = true)) {
             slackGateRule
+        } else if (isBrowserPackage(packageManager, packageName)) {
+            browserGateRule(packageManager, packageName)
         } else {
             null
         }
@@ -465,9 +471,110 @@ object OttoPolicyController {
     private fun shouldSuspendTimeGatedPackage(context: Context, rule: TimeGateRule): Boolean {
         if (isWithinAllowedHours(rule)) return false
 
-        val unlockedUntil = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getLong(KEY_SLACK_UNLOCKED_UNTIL, 0L)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val unlockedUntil = maxOf(
+            prefs.getLong(unlockKeyFor(rule.packageName), 0L),
+            legacyUnlockedUntil(rule, prefs)
+        )
         return System.currentTimeMillis() >= unlockedUntil
+    }
+
+    private fun installedTimeGateRules(context: Context): List<TimeGateRule> {
+        val packageManager = context.packageManager
+        return buildList {
+            if (isPackageInstalled(packageManager, slackGateRule.packageName)) {
+                add(slackGateRule)
+            }
+            browserPackageNames(packageManager)
+                .filterNot { it.equals(slackGateRule.packageName, ignoreCase = true) }
+                .mapTo(this) { browserGateRule(packageManager, it) }
+        }.distinctBy { packageKey(it.packageName) }
+    }
+
+    private fun browserGateRule(packageManager: PackageManager, packageName: String): TimeGateRule {
+        return TimeGateRule(
+            packageName = packageName,
+            label = appLabel(packageManager, packageName) ?: "Browser",
+            startHourInclusive = TIME_GATE_START_HOUR_INCLUSIVE,
+            endHourExclusive = TIME_GATE_END_HOUR_EXCLUSIVE,
+            challengeCodeLength = LAUNCH_GATE_CODE_LENGTH,
+            temporaryUnlockDurationMs = TIME_GATE_UNLOCK_DURATION_MS
+        )
+    }
+
+    private fun isBrowserPackage(packageManager: PackageManager, packageName: String): Boolean {
+        val targetPackageKey = packageKey(packageName)
+        return browserPackageNames(packageManager).any { packageKey(it) == targetPackageKey }
+    }
+
+    private fun browserPackageNames(packageManager: PackageManager): List<String> {
+        val packagesByKey = linkedMapOf<String, String>()
+        for (intent in browserQueryIntents()) {
+            for (resolveInfo in queryPolicyActivities(packageManager, intent)) {
+                val browserPackage = resolveInfo.activityInfo?.packageName ?: continue
+                if (browserPackage.isBlank()) continue
+                if (!isPackageInstalled(packageManager, browserPackage)) continue
+
+                packagesByKey.putIfAbsent(packageKey(browserPackage), browserPackage)
+            }
+        }
+        return packagesByKey.values.toList()
+    }
+
+    private fun queryPolicyActivities(
+        packageManager: PackageManager,
+        intent: Intent
+    ) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        packageManager.queryIntentActivities(
+            intent,
+            PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong())
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+    }
+
+    private fun browserQueryIntents(): List<Intent> {
+        return listOf("https://www.example.com", "http://www.example.com").map { url ->
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+        }
+    }
+
+    private fun appLabel(packageManager: PackageManager, packageName: String): String? {
+        return runCatching {
+            val app = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getApplicationInfo(
+                    packageName,
+                    PackageManager.ApplicationInfoFlags.of(PackageManager.MATCH_DISABLED_COMPONENTS.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getApplicationInfo(packageName, PackageManager.MATCH_DISABLED_COMPONENTS)
+            }
+            packageManager.getApplicationLabel(app).toString()
+        }.getOrNull()
+    }
+
+    private fun legacyUnlockedUntil(
+        rule: TimeGateRule,
+        prefs: SharedPreferences
+    ): Long {
+        return if (rule.packageName.equals(slackGateRule.packageName, ignoreCase = true)) {
+            prefs.getLong(KEY_LEGACY_SLACK_UNLOCKED_UNTIL, 0L)
+        } else {
+            0L
+        }
+    }
+
+    private fun unlockKeyFor(packageName: String): String {
+        return "$KEY_TIME_GATE_UNLOCKED_UNTIL_PREFIX${packageKey(packageName)}"
+    }
+
+    private fun packageKey(packageName: String): String {
+        return packageName.lowercase(Locale.US)
     }
 
     private fun isWithinAllowedHours(rule: TimeGateRule): Boolean {

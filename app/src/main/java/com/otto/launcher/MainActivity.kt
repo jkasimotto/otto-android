@@ -282,9 +282,9 @@ private fun LauncherScreen(
             OttoPolicyController.requiresLaunchGateCode(context, app.packageName) -> {
                 gatedLaunchApp = app
                 launchGateInput = ""
-                launchGateCode = OttoPolicyController.newLaunchGateCode(app.packageName).orEmpty()
+                launchGateCode = OttoPolicyController.newLaunchGateCode(context, app.packageName).orEmpty()
                 launchGateError = null
-                statusMessage = OttoPolicyController.launchGatePrompt(app.packageName)
+                statusMessage = OttoPolicyController.launchGatePrompt(context, app.packageName)
                 false
             }
 
@@ -706,7 +706,10 @@ private fun LauncherScreen(
                                     context.launchApp(app)
                                     statusMessage = "Opening ${app.label}"
                                 } else {
-                                    launchGateError = OttoPolicyController.launchGateFailureMessage(app.packageName)
+                                    launchGateError = OttoPolicyController.launchGateFailureMessage(
+                                        context,
+                                        app.packageName
+                                    )
                                 }
                             }
                         ) {
@@ -731,13 +734,14 @@ private fun LauncherScreen(
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
-                                OttoPolicyController.launchGatePrompt(app.packageName)
+                                OttoPolicyController.launchGatePrompt(context, app.packageName)
                                     ?: "Type the displayed code to continue."
                             )
                             Text(
                                 text = OttoPolicyController.formatLaunchGateCode(launchGateCode),
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.fillMaxWidth()
                             )
                             OutlinedTextField(
                                 value = launchGateInput,
