@@ -25,10 +25,13 @@ import com.otto.launcher.domain.command.AppCommandResult
 fun DistractionGateDialog(
     app: AppCommandResult,
     challengeCode: String,
+    driftText: String?,
+    isOverDriftCap: Boolean,
     onDismiss: () -> Unit,
     onOpen: (reason: String, timeboxMinutes: Int) -> Unit
 ) {
     var reason by rememberSaveable(app.packageName) { mutableStateOf("") }
+    var replacing by rememberSaveable(app.packageName) { mutableStateOf("") }
     var challenge by rememberSaveable(app.packageName, challengeCode) { mutableStateOf("") }
     var selectedMinutes by rememberSaveable(app.packageName) { mutableStateOf(10) }
     var error by rememberSaveable(app.packageName) { mutableStateOf<String?>(null) }
@@ -40,6 +43,21 @@ fun DistractionGateDialog(
         title = { Text("Open ${app.label}?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                driftText?.let {
+                    Text(
+                        text = "Digital drift today: $it",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    text = if (isOverDriftCap) {
+                        "Digital drift cap reached."
+                    } else {
+                        "This will spend from Digital drift."
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 OutlinedTextField(
                     value = reason,
                     onValueChange = {
@@ -51,6 +69,18 @@ fun DistractionGateDialog(
                     minLines = 2,
                     maxLines = 3
                 )
+                if (isOverDriftCap) {
+                    OutlinedTextField(
+                        value = replacing,
+                        onValueChange = {
+                            replacing = it.take(80)
+                            error = null
+                        },
+                        label = { Text("What is this replacing?") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
                 Text("Challenge", style = MaterialTheme.typography.labelLarge)
                 Text(
                     text = "Type: $challengeCode",
@@ -86,6 +116,7 @@ fun DistractionGateDialog(
                             val cleanReason = reason.trim()
                             when {
                                 cleanReason.length < 10 -> error = "Reason needs 10 characters."
+                                isOverDriftCap && replacing.trim().length < 3 -> error = "Name what this replaces."
                                 challenge != challengeCode -> error = "Challenge does not match."
                                 else -> onOpen(cleanReason, selectedMinutes)
                             }
@@ -116,4 +147,3 @@ private fun TimeboxButton(
         )
     }
 }
-

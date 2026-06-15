@@ -11,10 +11,14 @@ import android.provider.Settings
 import com.otto.launcher.domain.policy.AppDescriptor
 import com.otto.launcher.domain.policy.AppPolicyEngine
 import com.otto.launcher.domain.policy.AppTier
+import com.otto.launcher.domain.time.AppUsageSlice
+import com.otto.launcher.domain.time.UsageTimeSnapshot
 import com.otto.launcher.domain.usage.TodayUsageSummary
 import java.time.Clock
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -32,6 +36,31 @@ class UsageStatsRepository(
     fun observeTodayUsage(): Flow<TodayUsageSummary> = flow {
         while (true) {
             emit(todayUsage())
+            delay(60_000)
+        }
+    }
+
+    fun observeTodayUsageSlices(): Flow<UsageTimeSnapshot> = flow {
+        while (true) {
+            emit(usageSlices(dayStart(), clock.instant()))
+            delay(60_000)
+        }
+    }
+
+    fun observeUsageSlices(start: java.time.Instant, end: java.time.Instant): Flow<UsageTimeSnapshot> = flow {
+        while (true) {
+            emit(usageSlices(start, end))
+            delay(60_000)
+        }
+    }
+
+    fun observeCurrentWeekUsageSlices(): Flow<UsageTimeSnapshot> = flow {
+        while (true) {
+            val start = LocalDate.now(clock)
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                .atStartOfDay(zoneId)
+                .toInstant()
+            emit(usageSlices(start, clock.instant()))
             delay(60_000)
         }
     }
@@ -65,7 +94,7 @@ class UsageStatsRepository(
     fun todayUsage(): TodayUsageSummary {
         if (!hasUsageAccess()) return TodayUsageSummary.MissingPermission
         val now = clock.instant()
-        val start = LocalDate.now(clock).atStartOfDay(zoneId).toInstant()
+        val start = dayStart()
         val stats = usageStatsManager.queryAndAggregateUsageStats(start.toEpochMilli(), now.toEpochMilli())
         var totalMs = 0L
         var distractMs = 0L
@@ -95,6 +124,22 @@ class UsageStatsRepository(
         )
     }
 
+    fun usageSlices(start: java.time.Instant, end: java.time.Instant): UsageTimeSnapshot {
+        if (!hasUsageAccess()) return UsageTimeSnapshot.MissingPermission
+        val stats = usageStatsManager.queryAndAggregateUsageStats(start.toEpochMilli(), end.toEpochMilli())
+        val slices = stats
+            .mapNotNull { (packageName, usageStats) ->
+                val minutes = (usageStats.totalTimeInForeground.coerceAtLeast(0L) / 60_000L).toInt()
+                if (minutes > 0) AppUsageSlice(packageName, minutes) else null
+            }
+            .sortedByDescending { it.minutes }
+        return UsageTimeSnapshot(hasUsageAccess = true, slices = slices)
+    }
+
+    private fun dayStart(): java.time.Instant {
+        return LocalDate.now(clock).atStartOfDay(zoneId).toInstant()
+    }
+
     private fun appLabel(packageName: String): String {
         return runCatching {
             val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -107,4 +152,3 @@ class UsageStatsRepository(
         }.getOrDefault(packageName)
     }
 }
-

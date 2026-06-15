@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.otto.launcher.data.goals.GoalSettingsRepository
 import com.otto.launcher.data.mode.ModeRepository
 import com.otto.launcher.data.policy.PolicyRepository
+import com.otto.launcher.data.time.TimeLedgerRepository
 import com.otto.launcher.data.usage.UsageStatsRepository
 import com.otto.launcher.domain.command.CommandResolver
 import com.otto.launcher.domain.command.CommandResult
@@ -13,6 +14,13 @@ import com.otto.launcher.domain.mode.OttoMode
 import com.otto.launcher.domain.policy.AppDescriptor
 import com.otto.launcher.domain.policy.AppPolicy
 import com.otto.launcher.domain.policy.AppPolicyEngine
+import com.otto.launcher.domain.time.DailyTimeReview
+import com.otto.launcher.domain.time.DayPlanMode
+import com.otto.launcher.domain.time.TimeCategoryIds
+import com.otto.launcher.domain.time.TimeLedgerCalculator
+import com.otto.launcher.domain.time.TimeMode
+import com.otto.launcher.domain.time.TodayTimeLedger
+import com.otto.launcher.domain.time.WeeklyTimeLedger
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.domain.trace.TodayLedgerState
@@ -31,6 +39,9 @@ import kotlinx.coroutines.launch
 data class HomeUiState(
     val mode: OttoMode,
     val ledger: TodayLedgerState,
+    val timeLedger: TodayTimeLedger,
+    val weeklyTimeLedger: WeeklyTimeLedger,
+    val dailyTimeReview: DailyTimeReview,
     val unresolvedFood: List<FoodEntryEntity>,
     val inbox: List<InboxItemEntity>,
     val policies: List<AppPolicy>
@@ -40,25 +51,49 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val traceRepository = TraceV2Repository(application)
     private val goalsRepository = GoalSettingsRepository(application)
     private val usageStatsRepository = UsageStatsRepository(application)
+    private val timeLedgerRepository = TimeLedgerRepository(application)
     private val modeRepository = ModeRepository(application)
     private val policyRepository = PolicyRepository(application)
     private val seededPackages = MutableStateFlow<Set<String>>(emptySet())
 
     private val goals = goalsRepository.observeSettings()
     private val usage = usageStatsRepository.observeTodayUsage()
+    private val todayUsageSlices = usageStatsRepository.observeTodayUsageSlices()
+    private val weeklyUsageSlices = usageStatsRepository.observeCurrentWeekUsageSlices()
     private val ledger = traceRepository.observeTodayLedger(usage, goals)
+    private val timeLedger = timeLedgerRepository.observeTodayLedger(todayUsageSlices)
+    private val weeklyTimeLedger = timeLedgerRepository.observeWeeklyLedger(weeklyUsageSlices)
+    private val dailyTimeReview = timeLedgerRepository.observeDailyReview(todayUsageSlices)
+
+    private val traceAndTime = combine(
+        ledger,
+        timeLedger,
+        weeklyTimeLedger,
+        dailyTimeReview,
+        traceRepository.observeFoodReviewEntries()
+    ) { ledgerState, timeLedgerState, weeklyTimeLedgerState, dailyTimeReviewState, unresolvedFood ->
+        TraceAndTimeState(
+            ledger = ledgerState,
+            timeLedger = timeLedgerState,
+            weeklyTimeLedger = weeklyTimeLedgerState,
+            dailyTimeReview = dailyTimeReviewState,
+            unresolvedFood = unresolvedFood
+        )
+    }
 
     val uiState: StateFlow<HomeUiState> = combine(
         modeRepository.observeBaseMode(),
-        ledger,
-        traceRepository.observeFoodReviewEntries(),
+        traceAndTime,
         traceRepository.observeOpenInbox(),
         policyRepository.observePolicies()
-    ) { baseMode, ledgerState, unresolvedFood, inbox, policies ->
+    ) { baseMode, traceAndTimeState, inbox, policies ->
         HomeUiState(
-            mode = if (ledgerState.activeSleepStartAt != null) OttoMode.SLEEP else baseMode,
-            ledger = ledgerState,
-            unresolvedFood = unresolvedFood,
+            mode = if (traceAndTimeState.ledger.activeSleepStartAt != null) OttoMode.SLEEP else baseMode,
+            ledger = traceAndTimeState.ledger,
+            timeLedger = traceAndTimeState.timeLedger,
+            weeklyTimeLedger = traceAndTimeState.weeklyTimeLedger,
+            dailyTimeReview = traceAndTimeState.dailyTimeReview,
+            unresolvedFood = traceAndTimeState.unresolvedFood,
             inbox = inbox,
             policies = policies
         )
@@ -76,6 +111,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         seededPackages.value = packageKeys
         viewModelScope.launch {
             policyRepository.seedDefaults(apps)
+            timeLedgerRepository.seedDefaults(apps)
             traceRepository.backfillLegacyIfNeeded()
         }
     }
@@ -87,6 +123,36 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     fun setMode(mode: OttoMode) {
         modeRepository.setMode(mode)
+    }
+
+    fun startTimeBlock(mode: TimeMode, onStarted: () -> Unit = {}) {
+        viewModelScope.launch {
+            timeLedgerRepository.startBlock(mode)
+            onStarted()
+        }
+    }
+
+    fun startCategoryBlock(categoryId: String, label: String? = null, onStarted: () -> Unit = {}) {
+        viewModelScope.launch {
+            timeLedgerRepository.startCategoryBlock(categoryId, label)
+            onStarted()
+        }
+    }
+
+    fun finishActiveTimeBlock(onFinished: (Int?) -> Unit = {}) {
+        viewModelScope.launch {
+            onFinished(timeLedgerRepository.finishActiveBlock())
+        }
+    }
+
+    fun recordTimeDuration(categoryId: String, minutes: Int, label: String? = null) {
+        viewModelScope.launch {
+            timeLedgerRepository.recordDuration(categoryId, minutes, label)
+        }
+    }
+
+    fun recordTimeAffluence(score: Int) {
+        viewModelScope.launch { timeLedgerRepository.recordTimeAffluence(score) }
     }
 
     fun recordManualFoodEnergy(kJ: Int) {
@@ -149,9 +215,50 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 activeSleepStartAt = null,
                 unresolvedFoodCount = 0
             ),
+            timeLedger = emptyTodayTimeLedger(),
+            weeklyTimeLedger = emptyWeeklyTimeLedger(),
+            dailyTimeReview = DailyTimeReview(
+                date = LocalDate.now(),
+                rows = emptyList(),
+                unknownGaps = emptyList(),
+                timeAffluence = null
+            ),
             unresolvedFood = emptyList(),
             inbox = emptyList(),
             policies = emptyList()
         )
     }
+
+    private fun emptyTodayTimeLedger(): TodayTimeLedger {
+        return TodayTimeLedger(
+            date = LocalDate.now(),
+            hasUsageAccess = false,
+            activeBlock = null,
+            rows = emptyList(),
+            totals = emptyList(),
+            unknownMinutes = 0,
+            digitalDriftMinutes = 0,
+            digitalDriftCapMinutes = null,
+            dayPlanMode = DayPlanMode.NORMAL,
+            timeAffluence = null
+        )
+    }
+
+    private fun emptyWeeklyTimeLedger(): WeeklyTimeLedger {
+        val today = LocalDate.now()
+        return WeeklyTimeLedger(
+            startDate = today,
+            endDate = today,
+            rows = emptyList(),
+            experimentSuggestion = null
+        )
+    }
 }
+
+private data class TraceAndTimeState(
+    val ledger: TodayLedgerState,
+    val timeLedger: TodayTimeLedger,
+    val weeklyTimeLedger: WeeklyTimeLedger,
+    val dailyTimeReview: DailyTimeReview,
+    val unresolvedFood: List<FoodEntryEntity>
+)

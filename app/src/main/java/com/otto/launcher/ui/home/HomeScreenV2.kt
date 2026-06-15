@@ -36,7 +36,10 @@ import com.otto.launcher.domain.command.AppCommandResult
 import com.otto.launcher.domain.command.CommandResult
 import com.otto.launcher.domain.mode.OttoMode
 import com.otto.launcher.domain.policy.AppGate
-import com.otto.launcher.domain.policy.AppTier
+import com.otto.launcher.domain.time.DayPlanMode
+import com.otto.launcher.domain.time.TimeCategoryIds
+import com.otto.launcher.domain.time.TimeLedgerCalculator
+import com.otto.launcher.domain.time.displayLabel
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -44,15 +47,16 @@ import java.time.format.DateTimeFormatter
 enum class FastCaptureAction {
     FOOD,
     WEIGHT,
-    SLEEP,
+    MOVE,
     NOTE
 }
 
 enum class LedgerAction {
+    NOW,
     SLEEP,
-    WEIGHT,
-    FOOD,
-    PHONE
+    PEOPLE,
+    MOVE,
+    DRIFT
 }
 
 @Composable
@@ -93,8 +97,7 @@ fun HomeScreenV2(
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
                 HomeTopBar(
-                    mode = state.mode,
-                    date = state.ledger.date,
+                    state = state,
                     onOttoLongPress = onOttoLongPress
                 )
                 Text(
@@ -106,6 +109,20 @@ fun HomeScreenV2(
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                if (state.timeLedger.dayPlanMode == DayPlanMode.LOW_SLEEP) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Minimum viable day",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Protect sleep tonight.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 TodayLedger(
                     state = state,
                     onLedgerAction = onLedgerAction
@@ -155,8 +172,7 @@ fun HomeScreenV2(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeTopBar(
-    mode: OttoMode,
-    date: LocalDate,
+    state: HomeUiState,
     onOttoLongPress: () -> Unit
 ) {
     Row(
@@ -177,24 +193,25 @@ private fun HomeTopBar(
                 )
             )
             Text(
-                text = "${date.format(DateTimeFormatter.ofPattern("EEE d MMM"))} · ${LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))}",
+                text = "${state.timeLedger.date.format(DateTimeFormatter.ofPattern("EEE d MMM"))} · ${LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        ModeChip(mode = mode)
+        ModeChip(state = state)
     }
 }
 
 @Composable
-fun ModeChip(mode: OttoMode) {
+fun ModeChip(state: HomeUiState) {
     Text(
-        text = when (mode) {
-            OttoMode.OPEN -> "Open"
-            OttoMode.FOCUS -> "Focus"
-            OttoMode.WIND_DOWN -> "Wind-down"
-            OttoMode.SLEEP -> "Sleep"
-        },
+        text = state.timeLedger.activeBlock?.category?.displayLabel()
+            ?: when (state.mode) {
+                OttoMode.OPEN -> "Open"
+                OttoMode.FOCUS -> "Focus"
+                OttoMode.WIND_DOWN -> "Wind-down"
+                OttoMode.SLEEP -> "Sleep"
+            },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -206,11 +223,29 @@ fun TodayLedger(
     onLedgerAction: (LedgerAction) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        LedgerRow("Sleep", state.ledger.sleepText) { onLedgerAction(LedgerAction.SLEEP) }
-        LedgerRow("Weight", state.ledger.weightText) { onLedgerAction(LedgerAction.WEIGHT) }
-        LedgerRow("Food", state.ledger.foodText) { onLedgerAction(LedgerAction.FOOD) }
-        LedgerRow("Phone", state.ledger.phoneText) { onLedgerAction(LedgerAction.PHONE) }
+        LedgerRow("Now", nowText(state)) { onLedgerAction(LedgerAction.NOW) }
+        LedgerRow("Sleep", rowValue(state, TimeCategoryIds.SLEEP, state.ledger.sleepText)) {
+            onLedgerAction(LedgerAction.SLEEP)
+        }
+        LedgerRow("People", rowValue(state, TimeCategoryIds.RELATIONSHIPS, "not recorded")) {
+            onLedgerAction(LedgerAction.PEOPLE)
+        }
+        LedgerRow("Move", rowValue(state, TimeCategoryIds.MOVEMENT, "not recorded")) {
+            onLedgerAction(LedgerAction.MOVE)
+        }
+        LedgerRow("Drift", rowValue(state, TimeCategoryIds.DIGITAL_DRIFT, if (state.timeLedger.hasUsageAccess) "0m" else "usage access off")) {
+            onLedgerAction(LedgerAction.DRIFT)
+        }
     }
+}
+
+private fun nowText(state: HomeUiState): String {
+    val active = state.timeLedger.activeBlock ?: return "no active block"
+    return "${active.category.name} · ${TimeLedgerCalculator.formatDuration(active.elapsedMinutes)}"
+}
+
+private fun rowValue(state: HomeUiState, categoryId: String, fallback: String): String {
+    return state.timeLedger.rows.firstOrNull { it.categoryId == categoryId }?.value ?: fallback
 }
 
 @Composable
@@ -244,7 +279,7 @@ fun FastCaptureRow(
     Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
         FastCaptureLabel("Food", FastCaptureAction.FOOD, onAction, onLongPress)
         FastCaptureLabel("Weight", FastCaptureAction.WEIGHT, onAction, onLongPress)
-        FastCaptureLabel("Sleep", FastCaptureAction.SLEEP, onAction, onLongPress)
+        FastCaptureLabel("Move", FastCaptureAction.MOVE, onAction, onLongPress)
         FastCaptureLabel("Note", FastCaptureAction.NOTE, onAction, onLongPress)
     }
 }
@@ -391,4 +426,3 @@ private fun SleepModeHome(
         }
     }
 }
-

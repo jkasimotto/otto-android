@@ -104,6 +104,8 @@ import com.otto.launcher.domain.command.OttoCommand
 import com.otto.launcher.domain.mode.OttoMode
 import com.otto.launcher.domain.policy.AppDescriptor
 import com.otto.launcher.domain.policy.AppGate
+import com.otto.launcher.domain.time.TimeCategoryIds
+import com.otto.launcher.domain.time.TimeMode
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.data.policy.PolicyRuntime
@@ -121,6 +123,10 @@ import com.otto.launcher.ui.review.TodayScreen
 import com.otto.launcher.ui.review.WeekScreen
 import com.otto.launcher.ui.settings.SettingsHome
 import com.otto.launcher.ui.theme.OttoLauncherTheme
+import com.otto.launcher.ui.time.StartBlockDialog
+import com.otto.launcher.ui.time.TimeBudgetScreen
+import com.otto.launcher.ui.time.TodayTimeReviewScreen
+import com.otto.launcher.ui.time.WeeklyTimeReviewScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -268,6 +274,8 @@ private fun LauncherScreen(
     var inboxReviewVisible by remember { mutableStateOf(false) }
     var todayV2Visible by remember { mutableStateOf(false) }
     var weekV2Visible by remember { mutableStateOf(false) }
+    var startBlockVisible by remember { mutableStateOf(false) }
+    var timeBudgetVisible by remember { mutableStateOf(false) }
     var maintenanceSection by remember { mutableStateOf<MaintenanceSection?>(null) }
     var traceCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
     var pendingCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
@@ -505,6 +513,35 @@ private fun LauncherScreen(
         }
     }
 
+    fun startTimeMode(mode: TimeMode) {
+        launcherViewModel.startTimeBlock(mode) {
+            applyV2PolicyNow()
+        }
+        statusMessage = when (mode) {
+            TimeMode.FOCUS_WORK -> "Focus work"
+            TimeMode.RELATIONSHIP -> "Social"
+            TimeMode.MOVEMENT -> "Movement"
+            TimeMode.REST -> "Rest"
+            TimeMode.OPEN -> "Open"
+            TimeMode.WIND_DOWN -> "Wind-down"
+            TimeMode.SLEEP -> "Sleep"
+        }
+    }
+
+    fun startTimeCategory(categoryId: String, label: String) {
+        launcherViewModel.startCategoryBlock(categoryId, label) {
+            applyV2PolicyNow()
+        }
+        statusMessage = label.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+    }
+
+    fun finishTimeBlock() {
+        launcherViewModel.finishActiveTimeBlock { minutes ->
+            statusMessage = minutes?.let { "Saved: ${formatMinutesHuman(it)}" } ?: "No active block."
+            applyV2PolicyNow()
+        }
+    }
+
     fun handleAppResult(result: AppCommandResult) {
         when (val gate = result.gate) {
             AppGate.Allowed -> {
@@ -569,8 +606,17 @@ private fun LauncherScreen(
                 statusMessage = "Task saved."
             }
             OttoCommand.OpenToday -> todayV2Visible = true
-            OttoCommand.OpenReview -> foodReviewVisible = true
+            OttoCommand.OpenReview -> todayV2Visible = true
             OttoCommand.OpenWeek -> weekV2Visible = true
+            OttoCommand.OpenTimeBudget -> timeBudgetVisible = true
+            OttoCommand.OpenTimeReview -> todayV2Visible = true
+            is OttoCommand.StartTimeBlock -> startTimeMode(command.mode)
+            is OttoCommand.StartTimeCategoryBlock -> startTimeCategory(command.categoryId, command.label)
+            OttoCommand.FinishTimeBlock -> finishTimeBlock()
+            is OttoCommand.SaveTimeBlockDuration -> {
+                launcherViewModel.recordTimeDuration(command.categoryId, command.minutes, command.label)
+                statusMessage = "Saved: ${formatMinutesHuman(command.minutes)}"
+            }
             is OttoCommand.SetMode -> {
                 launcherViewModel.setMode(command.mode)
                 statusMessage = if (command.mode == OttoMode.FOCUS) "Focus mode" else "Open mode"
@@ -701,16 +747,7 @@ private fun LauncherScreen(
                     when (action) {
                         FastCaptureAction.FOOD -> openTraceCamera(isDrinkOnly = false)
                         FastCaptureAction.WEIGHT -> traceWeightVisible = true
-                        FastCaptureAction.SLEEP -> {
-                            if (homeState.mode == OttoMode.SLEEP) {
-                                launcherViewModel.endSleep { minutes ->
-                                    statusMessage = minutes?.let { "Sleep saved: ${formatMinutesHuman(it)}" } ?: "Sleep saved."
-                                    applyV2PolicyNow()
-                                }
-                            } else {
-                                sleepStartVisible = true
-                            }
-                        }
+                        FastCaptureAction.MOVE -> startTimeMode(TimeMode.MOVEMENT)
                         FastCaptureAction.NOTE -> noteCaptureVisible = true
                     }
                 },
@@ -721,6 +758,7 @@ private fun LauncherScreen(
                 },
                 onLedgerAction = { action ->
                     when (action) {
+                        LedgerAction.NOW -> startBlockVisible = true
                         LedgerAction.SLEEP -> {
                             if (homeState.mode == OttoMode.SLEEP) {
                                 launcherViewModel.endSleep { minutes ->
@@ -731,9 +769,15 @@ private fun LauncherScreen(
                                 sleepStartVisible = true
                             }
                         }
-                        LedgerAction.WEIGHT -> traceWeightVisible = true
-                        LedgerAction.FOOD -> foodReviewVisible = true
-                        LedgerAction.PHONE -> launcherViewModel.openUsageAccessSettings()
+                        LedgerAction.PEOPLE -> startTimeMode(TimeMode.RELATIONSHIP)
+                        LedgerAction.MOVE -> startTimeMode(TimeMode.MOVEMENT)
+                        LedgerAction.DRIFT -> {
+                            if (homeState.timeLedger.hasUsageAccess) {
+                                todayV2Visible = true
+                            } else {
+                                launcherViewModel.openUsageAccessSettings()
+                            }
+                        }
                     }
                 },
                 onAppResult = { handleAppResult(it) },
@@ -774,9 +818,13 @@ private fun LauncherScreen(
             }
 
             gatedDistractionApp?.let { app ->
+                val driftRow = homeState.timeLedger.rows.firstOrNull { it.categoryId == TimeCategoryIds.DIGITAL_DRIFT }
+                val driftCap = homeState.timeLedger.digitalDriftCapMinutes
                 DistractionGateDialog(
                     app = app,
                     challengeCode = launchGateCode,
+                    driftText = driftRow?.value,
+                    isOverDriftCap = driftCap != null && homeState.timeLedger.digitalDriftMinutes >= driftCap,
                     onDismiss = {
                         gatedDistractionApp = null
                         launchGateInput = ""
@@ -1153,16 +1201,39 @@ private fun LauncherScreen(
             }
 
             if (todayV2Visible) {
-                TodayScreen(
-                    state = homeState,
-                    onDismiss = { todayV2Visible = false }
+                TodayTimeReviewScreen(
+                    review = homeState.dailyTimeReview,
+                    onDismiss = { todayV2Visible = false },
+                    onPulse = { launcherViewModel.recordTimeAffluence(it) }
                 )
             }
 
             if (weekV2Visible) {
-                WeekScreen(
-                    state = traceState,
+                WeeklyTimeReviewScreen(
+                    ledger = homeState.weeklyTimeLedger,
                     onDismiss = { weekV2Visible = false }
+                )
+            }
+
+            if (timeBudgetVisible) {
+                TimeBudgetScreen(
+                    today = homeState.timeLedger,
+                    week = homeState.weeklyTimeLedger,
+                    onDismiss = { timeBudgetVisible = false }
+                )
+            }
+
+            if (startBlockVisible) {
+                StartBlockDialog(
+                    onDismiss = { startBlockVisible = false },
+                    onStartMode = {
+                        startBlockVisible = false
+                        startTimeMode(it)
+                    },
+                    onStartCategory = { categoryId, label ->
+                        startBlockVisible = false
+                        startTimeCategory(categoryId, label)
+                    }
                 )
             }
 
@@ -1175,6 +1246,19 @@ private fun LauncherScreen(
                     },
                     onDismiss = { maintenanceSection = null },
                     onOpenSystemSettings = { context.openSystemSettings() },
+                    onOpenUsageAccess = { launcherViewModel.openUsageAccessSettings() },
+                    onOpenTimeBudget = {
+                        maintenanceSection = null
+                        timeBudgetVisible = true
+                    },
+                    onOpenTimeReview = {
+                        maintenanceSection = null
+                        todayV2Visible = true
+                    },
+                    onOpenWeeklyTimeReview = {
+                        maintenanceSection = null
+                        weekV2Visible = true
+                    },
                     onOpenLogs = {
                         refreshDiagnostics()
                         diagnosticsVisible = true

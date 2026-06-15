@@ -13,6 +13,10 @@ fun SettingsHome(
     section: String,
     onDismiss: () -> Unit,
     onOpenSystemSettings: () -> Unit,
+    onOpenUsageAccess: () -> Unit,
+    onOpenTimeBudget: () -> Unit,
+    onOpenTimeReview: () -> Unit,
+    onOpenWeeklyTimeReview: () -> Unit,
     onOpenLogs: () -> Unit,
     onUpdate: () -> Unit
 ) {
@@ -23,10 +27,13 @@ fun SettingsHome(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onOpenSystemSettings) { Text("Settings") }
+                TextButton(onClick = onOpenTimeBudget) { Text("Time Ledger") }
+                TextButton(onClick = onOpenTimeReview) { Text("Review today") }
+                TextButton(onClick = onOpenWeeklyTimeReview) { Text("Review week") }
+                TextButton(onClick = onOpenUsageAccess) { Text("Usage access") }
                 TextButton(onClick = onOpenLogs) { Text("Logs") }
                 TextButton(onClick = onUpdate) { Text("Update") }
             }
         }
     )
 }
-

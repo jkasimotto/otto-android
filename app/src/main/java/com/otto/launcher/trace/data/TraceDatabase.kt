@@ -9,6 +9,9 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.otto.launcher.domain.policy.AppTier
+import com.otto.launcher.domain.time.BudgetPeriod
+import com.otto.launcher.domain.time.TimeBlockSource
+import com.otto.launcher.domain.time.TimeCategoryKind
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.trace.domain.MealSlot
@@ -35,9 +38,14 @@ import java.time.LocalTime
         V2SleepSessionEntity::class,
         InboxItemEntity::class,
         HealthConnectMappingEntity::class,
-        DailyLocalSummaryEntity::class
+        DailyLocalSummaryEntity::class,
+        TimeCategoryEntity::class,
+        TimeBudgetEntity::class,
+        TimeBlockEntity::class,
+        WellbeingPulseEntity::class,
+        AppTimeMappingEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(TraceConverters::class)
@@ -57,6 +65,7 @@ abstract class TraceDatabase : RoomDatabase() {
                     "trace.db"
                 )
                     .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }
@@ -233,6 +242,101 @@ abstract class TraceDatabase : RoomDatabase() {
                 )
             }
         }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `time_category` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `sortOrder` INTEGER NOT NULL,
+                        `isDefault` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `time_budget` (
+                        `id` TEXT NOT NULL,
+                        `categoryId` TEXT NOT NULL,
+                        `period` TEXT NOT NULL,
+                        `floorMinutes` INTEGER,
+                        `targetMinutes` INTEGER,
+                        `capMinutes` INTEGER,
+                        `activeFrom` TEXT NOT NULL,
+                        `activeTo` TEXT,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_budget_categoryId` ON `time_budget` (`categoryId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_budget_period` ON `time_budget` (`period`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_budget_activeFrom` ON `time_budget` (`activeFrom`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_budget_activeTo` ON `time_budget` (`activeTo`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `time_block` (
+                        `id` TEXT NOT NULL,
+                        `categoryId` TEXT NOT NULL,
+                        `startedAt` INTEGER NOT NULL,
+                        `endedAt` INTEGER,
+                        `source` TEXT NOT NULL,
+                        `confidence` REAL NOT NULL,
+                        `label` TEXT,
+                        `linkedPackageName` TEXT,
+                        `linkedCalendarEventId` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_block_categoryId` ON `time_block` (`categoryId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_block_startedAt` ON `time_block` (`startedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_block_endedAt` ON `time_block` (`endedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_block_source` ON `time_block` (`source`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_time_block_linkedPackageName` ON `time_block` (`linkedPackageName`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `wellbeing_pulse` (
+                        `id` TEXT NOT NULL,
+                        `timeBlockId` TEXT,
+                        `date` TEXT NOT NULL,
+                        `timeAffluence` INTEGER,
+                        `enjoyment` INTEGER,
+                        `meaning` INTEGER,
+                        `energy` INTEGER,
+                        `connection` INTEGER,
+                        `flow` INTEGER,
+                        `stress` INTEGER,
+                        `note` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_wellbeing_pulse_timeBlockId` ON `wellbeing_pulse` (`timeBlockId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_wellbeing_pulse_date` ON `wellbeing_pulse` (`date`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_time_mapping` (
+                        `packageName` TEXT NOT NULL,
+                        `defaultCategoryId` TEXT NOT NULL,
+                        `appTier` TEXT NOT NULL,
+                        `countAsDigitalDrift` INTEGER NOT NULL,
+                        `requiresIntent` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`packageName`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
     }
 }
 
@@ -296,4 +400,22 @@ class TraceConverters {
 
     @TypeConverter
     fun stringToInboxState(value: String?): InboxState? = value?.let(InboxState::valueOf)
+
+    @TypeConverter
+    fun timeCategoryKindToString(value: TimeCategoryKind?): String? = value?.name
+
+    @TypeConverter
+    fun stringToTimeCategoryKind(value: String?): TimeCategoryKind? = value?.let(TimeCategoryKind::valueOf)
+
+    @TypeConverter
+    fun budgetPeriodToString(value: BudgetPeriod?): String? = value?.name
+
+    @TypeConverter
+    fun stringToBudgetPeriod(value: String?): BudgetPeriod? = value?.let(BudgetPeriod::valueOf)
+
+    @TypeConverter
+    fun timeBlockSourceToString(value: TimeBlockSource?): String? = value?.name
+
+    @TypeConverter
+    fun stringToTimeBlockSource(value: String?): TimeBlockSource? = value?.let(TimeBlockSource::valueOf)
 }

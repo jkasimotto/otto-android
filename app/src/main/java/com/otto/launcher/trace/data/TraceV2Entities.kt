@@ -4,6 +4,9 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.otto.launcher.domain.policy.AppTier
+import com.otto.launcher.domain.time.BudgetPeriod
+import com.otto.launcher.domain.time.TimeBlockSource
+import com.otto.launcher.domain.time.TimeCategoryKind
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import java.time.Instant
@@ -181,3 +184,89 @@ data class DailyLocalSummaryEntity(
     val updatedAt: Instant
 )
 
+@Entity(tableName = "time_category")
+data class TimeCategoryEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val kind: TimeCategoryKind,
+    val sortOrder: Int,
+    val isDefault: Boolean,
+    val createdAt: Instant,
+    val updatedAt: Instant
+)
+
+@Entity(
+    tableName = "time_budget",
+    indices = [
+        Index("categoryId"),
+        Index("period"),
+        Index("activeFrom"),
+        Index("activeTo")
+    ]
+)
+data class TimeBudgetEntity(
+    @PrimaryKey val id: String,
+    val categoryId: String,
+    val period: BudgetPeriod,
+    val floorMinutes: Int?,
+    val targetMinutes: Int?,
+    val capMinutes: Int?,
+    val activeFrom: LocalDate,
+    val activeTo: LocalDate?
+)
+
+@Entity(
+    tableName = "time_block",
+    indices = [
+        Index("categoryId"),
+        Index("startedAt"),
+        Index("endedAt"),
+        Index("source"),
+        Index("linkedPackageName")
+    ]
+)
+data class TimeBlockEntity(
+    @PrimaryKey val id: String,
+    val categoryId: String,
+    val startedAt: Instant,
+    val endedAt: Instant?,
+    val source: TimeBlockSource,
+    val confidence: Float,
+    val label: String?,
+    val linkedPackageName: String?,
+    val linkedCalendarEventId: String?,
+    val createdAt: Instant,
+    val updatedAt: Instant
+)
+
+@Entity(
+    tableName = "wellbeing_pulse",
+    indices = [
+        Index("timeBlockId"),
+        Index("date")
+    ]
+)
+data class WellbeingPulseEntity(
+    @PrimaryKey val id: String,
+    val timeBlockId: String?,
+    val date: LocalDate,
+    val timeAffluence: Int?,
+    val enjoyment: Int?,
+    val meaning: Int?,
+    val energy: Int?,
+    val connection: Int?,
+    val flow: Int?,
+    val stress: Int?,
+    val note: String?,
+    val createdAt: Instant
+)
+
+@Entity(tableName = "app_time_mapping")
+data class AppTimeMappingEntity(
+    @PrimaryKey val packageName: String,
+    val defaultCategoryId: String,
+    val appTier: AppTier,
+    val countAsDigitalDrift: Boolean,
+    val requiresIntent: Boolean,
+    val updatedAt: Instant
+)
