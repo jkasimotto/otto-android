@@ -93,6 +93,12 @@ object DefaultAppPolicyCatalog {
         "twitch"
     )
 
+    private val peoplePackageHints = listOf(
+        "com.facebook.orca",
+        "com.facebook.mlite",
+        "messenger"
+    )
+
     private val workPackageHints = listOf(
         "slack",
         "teams",
@@ -124,6 +130,7 @@ object DefaultAppPolicyCatalog {
         val tier = when {
             adminPackageHints.any(haystack::contains) -> AppTier.ADMIN
             corePackageHints.any(haystack::contains) -> AppTier.CORE
+            peoplePackageHints.any(haystack::contains) -> AppTier.PEOPLE
             workPackageHints.any(haystack::contains) -> AppTier.WORK
             distractionPackageHints.any(haystack::contains) -> AppTier.DISTRACTION
             else -> AppTier.UTILITY
@@ -141,4 +148,3 @@ object DefaultAppPolicyCatalog {
         )
     }
 }
-

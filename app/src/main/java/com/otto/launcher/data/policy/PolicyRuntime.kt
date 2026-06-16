@@ -4,9 +4,11 @@ import android.content.Context
 import com.otto.launcher.device.DeviceOwnerController
 import com.otto.launcher.domain.policy.AppTier
 import com.otto.launcher.domain.time.TimeCategoryIds
+import com.otto.launcher.trace.data.AppPolicyEntity
 import com.otto.launcher.trace.data.AppSessionEntity
 import com.otto.launcher.trace.data.TraceDatabase
 import java.time.Clock
+import java.time.Instant
 
 object PolicyRuntime {
     suspend fun applyCurrentPolicy(
@@ -18,6 +20,9 @@ object PolicyRuntime {
         if (!controller.isDeviceOwner()) return
 
         val dao = TraceDatabase.get(appContext).traceV2Dao()
+        repairCriticalPeoplePolicies(dao.appPolicies(), clock.instant()).takeIf { it.isNotEmpty() }?.let {
+            dao.upsertAppPolicies(it)
+        }
         val policies = dao.appPolicies()
         if (policies.isEmpty()) return
 
@@ -62,6 +67,13 @@ object PolicyRuntime {
         val minutes = timeboxMinutes ?: return false
         if (endedAt != null) return false
         return clock.instant().isBefore(startedAt.plusSeconds(minutes * 60L))
+    }
+
+    private fun repairCriticalPeoplePolicies(
+        policies: List<AppPolicyEntity>,
+        now: Instant
+    ): List<AppPolicyEntity> {
+        return policies.mapNotNull { policy -> policy.repairCriticalPeoplePolicy(now) }
     }
 
     private fun shouldHideForActiveTime(tier: AppTier, activeTimeCategory: String?): Boolean {

@@ -77,6 +77,7 @@ fun HomeScreenV2(
     onEmergency: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isSearching = query.isNotBlank()
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -100,37 +101,39 @@ fun HomeScreenV2(
                     state = state,
                     onOttoLongPress = onOttoLongPress
                 )
-                Text(
-                    text = when (state.mode) {
-                        OttoMode.FOCUS -> "Focus mode"
-                        OttoMode.WIND_DOWN -> "Wind-down"
-                        else -> "What are you here to do?"
-                    },
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (state.timeLedger.dayPlanMode == DayPlanMode.LOW_SLEEP) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Minimum viable day",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Protect sleep tonight.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                if (!isSearching) {
+                    Text(
+                        text = when (state.mode) {
+                            OttoMode.FOCUS -> "Focus mode"
+                            OttoMode.WIND_DOWN -> "Wind-down"
+                            else -> "What are you here to do?"
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (state.timeLedger.dayPlanMode == DayPlanMode.LOW_SLEEP) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Minimum viable day",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Protect sleep tonight.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                    TodayLedger(
+                        state = state,
+                        onLedgerAction = onLedgerAction
+                    )
+                    FastCaptureRow(
+                        onAction = onFastCapture,
+                        onLongPress = onFastCaptureLongPress
+                    )
                 }
-                TodayLedger(
-                    state = state,
-                    onLedgerAction = onLedgerAction
-                )
-                FastCaptureRow(
-                    onAction = onFastCapture,
-                    onLongPress = onFastCaptureLongPress
-                )
             }
 
             AppSearchResults(
@@ -140,7 +143,7 @@ fun HomeScreenV2(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .fillMaxSize()
-                    .padding(top = 238.dp, bottom = 88.dp)
+                    .padding(top = if (isSearching) 72.dp else 238.dp, bottom = 88.dp)
             )
 
             CommandBar(

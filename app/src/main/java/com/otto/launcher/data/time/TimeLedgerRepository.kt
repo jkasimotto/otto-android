@@ -1,6 +1,7 @@
 package com.otto.launcher.data.time
 
 import android.content.Context
+import com.otto.launcher.data.policy.isCriticalPeoplePackage
 import com.otto.launcher.domain.policy.AppDescriptor
 import com.otto.launcher.domain.policy.AppPolicyEngine
 import com.otto.launcher.domain.policy.AppTier
@@ -146,9 +147,10 @@ class TimeLedgerRepository(
         if (dao.activeTimeBudgets(LocalDate.now(clock)).isEmpty()) {
             dao.upsertTimeBudgets(defaultBudgets(LocalDate.now(clock)))
         }
-        val existingMappings = dao.appTimeMappings().map { AppPolicyEngine.packageKey(it.packageName) }.toSet()
+        val existingMappings = dao.appTimeMappings()
+        val existingMappingKeys = existingMappings.map { AppPolicyEngine.packageKey(it.packageName) }.toSet()
         val newMappings = apps
-            .filter { AppPolicyEngine.packageKey(it.packageName) !in existingMappings }
+            .filter { AppPolicyEngine.packageKey(it.packageName) !in existingMappingKeys }
             .map { app ->
                 val policy = AppPolicyEngine().policyFor(app)
                 val categoryId = defaultCategoryId(policy.tier, app)
@@ -161,8 +163,10 @@ class TimeLedgerRepository(
                     updatedAt = now
                 )
             }
-        if (newMappings.isNotEmpty()) {
-            dao.upsertAppTimeMappings(newMappings)
+        val repairedMappings = existingMappings.mapNotNull { it.repairCriticalPeopleMapping(now) }
+        val mappingsToUpsert = newMappings + repairedMappings
+        if (mappingsToUpsert.isNotEmpty()) {
+            dao.upsertAppTimeMappings(mappingsToUpsert)
         }
     }
 
@@ -308,6 +312,25 @@ class TimeLedgerRepository(
     private fun labelForCategory(categoryId: String): String {
         return DefaultTimeCategories.categories.firstOrNull { it.id == categoryId }?.name ?: categoryId
     }
+}
+
+private fun AppTimeMappingEntity.repairCriticalPeopleMapping(now: Instant): AppTimeMappingEntity? {
+    if (!isCriticalPeoplePackage(packageName)) return null
+    if (
+        defaultCategoryId == TimeCategoryIds.RELATIONSHIPS &&
+        appTier == AppTier.PEOPLE &&
+        !countAsDigitalDrift &&
+        !requiresIntent
+    ) {
+        return null
+    }
+    return copy(
+        defaultCategoryId = TimeCategoryIds.RELATIONSHIPS,
+        appTier = AppTier.PEOPLE,
+        countAsDigitalDrift = false,
+        requiresIntent = false,
+        updatedAt = now
+    )
 }
 
 private data class TodayLedgerBase(

@@ -32,8 +32,24 @@ class AppPolicyEngineTest {
         assertTrue(gate is AppGate.Distraction)
     }
 
+    @Test
+    fun messengerIsPeopleNotDistraction() {
+        val engine = AppPolicyEngine(clock = fixedClock("2026-06-15T10:00:00Z"))
+        val app = AppDescriptor("Messenger", "com.facebook.orca", "MessengerActivity")
+
+        assertEquals(AppTier.PEOPLE, engine.policyFor(app).tier)
+        assertEquals(AppGate.Allowed, engine.gateFor(app))
+    }
+
+    @Test
+    fun facebookAppRemainsDistraction() {
+        val engine = AppPolicyEngine(clock = fixedClock("2026-06-15T10:00:00Z"))
+        val gate = engine.gateFor(AppDescriptor("Facebook", "com.facebook.katana", "FacebookActivity"))
+
+        assertTrue(gate is AppGate.Distraction)
+    }
+
     private fun fixedClock(value: String): Clock {
         return Clock.fixed(Instant.parse(value), ZoneId.of("UTC"))
     }
 }
-

@@ -185,12 +185,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         OttoDiagnostics.info(applicationContext, "MainActivity", "Launcher resumed.")
-        refreshLauncherApps()
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 OttoPolicyController.applyPolicies(this@MainActivity)
                 PolicyRuntime.applyCurrentPolicy(this@MainActivity)
             }
+            refreshLauncherApps(forceRefresh = true)
             OttoPolicyController.startWebsiteVpnIfNeeded(this@MainActivity)
             OttoPolicyController.syncLockTaskMode(this@MainActivity)
         }
@@ -205,8 +205,8 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun refreshLauncherApps() {
-        launcherApps = loadLauncherApps(packageManager)
+    private fun refreshLauncherApps(forceRefresh: Boolean = false) {
+        launcherApps = loadLauncherApps(packageManager, forceRefresh)
     }
 }
 

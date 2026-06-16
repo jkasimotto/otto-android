@@ -39,13 +39,16 @@ class PolicyRepository(
     }
 
     suspend fun seedDefaults(apps: List<AppDescriptor>) {
-        val existing = dao.appPolicies().map { AppPolicyEngine.packageKey(it.packageName) }.toSet()
+        val existingPolicies = dao.appPolicies()
+        val existing = existingPolicies.map { AppPolicyEngine.packageKey(it.packageName) }.toSet()
         val now = clock.instant()
         val defaults = apps
             .filter { AppPolicyEngine.packageKey(it.packageName) !in existing }
             .map { DefaultAppPolicyCatalog.policyFor(it).toEntity(now) }
-        if (defaults.isNotEmpty()) {
-            dao.upsertAppPolicies(defaults)
+        val repaired = existingPolicies.mapNotNull { it.repairCriticalPeoplePolicy(now) }
+        val changes = defaults + repaired
+        if (changes.isNotEmpty()) {
+            dao.upsertAppPolicies(changes)
         }
     }
 
@@ -132,4 +135,3 @@ private fun parseWindows(value: String?): List<TimeWindow> {
         )
     )
 }
-

@@ -2,6 +2,7 @@ package com.otto.launcher.domain.command
 
 import com.otto.launcher.domain.policy.AppDescriptor
 import com.otto.launcher.domain.policy.AppGate
+import com.otto.launcher.domain.policy.AppTier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,6 +11,7 @@ class CommandResolverTest {
     private val apps = listOf(
         AppDescriptor("Maps", "com.google.android.apps.maps", "MapsActivity"),
         AppDescriptor("Reddit", "com.reddit.frontpage", "RedditActivity"),
+        AppDescriptor("Messenger", "com.facebook.orca", "MessengerActivity"),
         AppDescriptor("Food Notes", "com.example.foodnotes", "FoodActivity")
     )
 
@@ -44,5 +46,14 @@ class CommandResolverTest {
         assertEquals("Reddit", appResults.results.first().label)
         assertTrue(appResults.results.first().gate is AppGate.Distraction)
     }
-}
 
+    @Test
+    fun messengerAppearsAsAllowedPeopleApp() {
+        val result = CommandResolver().resolve("mes", apps)
+
+        val appResults = result as CommandResult.AppResults
+        assertEquals("Messenger", appResults.results.first().label)
+        assertEquals(AppTier.PEOPLE, appResults.results.first().tier)
+        assertEquals(AppGate.Allowed, appResults.results.first().gate)
+    }
+}
