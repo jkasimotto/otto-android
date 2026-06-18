@@ -2,6 +2,7 @@ package com.otto.launcher.ui.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -75,6 +76,7 @@ fun HomeScreenV2(
     onFastCapture: (FastCaptureAction) -> Unit,
     onFastCaptureLongPress: (FastCaptureAction) -> Unit,
     onLedgerAction: (LedgerAction) -> Unit,
+    onTapSleepDay: (WeeklySleepDay) -> Unit,
     onAppResult: (AppCommandResult) -> Unit,
     onAppLongPress: (AppCommandResult) -> Unit,
     onOttoLongPress: () -> Unit,
@@ -133,7 +135,8 @@ fun HomeScreenV2(
                     SleepPanel(
                         weeklySleep = state.weeklySleep,
                         phoneUsageText = state.ledger.phoneText,
-                        onLogSleep = { onLedgerAction(LedgerAction.SLEEP) }
+                        onLogSleep = { onLedgerAction(LedgerAction.SLEEP) },
+                        onTapDay = onTapSleepDay
                     )
                 }
             }
@@ -348,7 +351,8 @@ fun CommandBar(
 fun SleepPanel(
     weeklySleep: List<WeeklySleepDay>,
     phoneUsageText: String,
-    onLogSleep: () -> Unit
+    onLogSleep: () -> Unit,
+    onTapDay: (WeeklySleepDay) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
@@ -370,8 +374,9 @@ fun SleepPanel(
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             weeklySleep.forEach { day ->
-                SleepDayRow(day = day, onTap = onLogSleep)
+                SleepDayRow(day = day, onTap = { onTapDay(day) })
             }
+            SleepTimeAxis()
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -451,6 +456,13 @@ private fun SleepDayRow(day: WeeklySleepDay, onTap: () -> Unit) {
                     )
                 }
             }
+            val midnightX = (4f / 16f) * w
+            drawLine(
+                color = emptyColor.copy(alpha = 0.8f),
+                start = androidx.compose.ui.geometry.Offset(midnightX, 0f),
+                end = androidx.compose.ui.geometry.Offset(midnightX, h),
+                strokeWidth = 1.dp.toPx()
+            )
         }
 
         val durationText = if (day.startAt != null && day.endAt != null) {
@@ -467,6 +479,27 @@ private fun SleepDayRow(day: WeeklySleepDay, onTap: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(56.dp)
         )
+    }
+}
+
+@Composable
+private fun SleepTimeAxis() {
+    // 7 labels span 12h (8p-8a) out of the 16h window; final 4h (8a-12p) is a trailing spacer.
+    // SpaceBetween over weight(12) + Spacer weight(4) places each label at the correct fraction.
+    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+    val labelStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Spacer(Modifier.width(42.dp))
+        Row(modifier = Modifier.weight(12f), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("8p", "10p", "12a", "2a", "4a", "6a", "8a").forEach { label ->
+                Text(text = label, style = labelStyle, color = labelColor)
+            }
+        }
+        Spacer(modifier = Modifier.weight(4f))
+        Spacer(Modifier.width(56.dp))
     }
 }
 

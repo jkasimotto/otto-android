@@ -108,6 +108,9 @@ import com.otto.launcher.domain.time.TimeCategoryIds
 import com.otto.launcher.domain.time.TimeMode
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
+import com.otto.launcher.domain.trace.WeeklySleepDay
+import com.otto.launcher.trace.domain.SleepEstimate
+import java.time.ZoneId
 import com.otto.launcher.data.policy.PolicyRuntime
 import com.otto.launcher.device.DeviceOwnerController
 import com.otto.launcher.ui.capture.NoteCaptureSheet
@@ -277,6 +280,7 @@ private fun LauncherScreen(
     var startBlockVisible by remember { mutableStateOf(false) }
     var timeBudgetVisible by remember { mutableStateOf(false) }
     var maintenanceSection by remember { mutableStateOf<MaintenanceSection?>(null) }
+    var editSleepDay by remember { mutableStateOf<WeeklySleepDay?>(null) }
     var traceCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
     var pendingCameraDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
     var pendingImportDrinkOnly by remember { mutableStateOf<Boolean?>(null) }
@@ -780,6 +784,7 @@ private fun LauncherScreen(
                         }
                     }
                 },
+                onTapSleepDay = { day -> editSleepDay = day },
                 onAppResult = { handleAppResult(it) },
                 onAppLongPress = { result ->
                     findAppInfo(result)?.let { context.openAppInfo(it) }
@@ -1328,6 +1333,30 @@ private fun LauncherScreen(
                     onDismiss = { traceSleepVisible = false },
                     onSave = { startAt, endAt, adjusted ->
                         traceViewModel.recordSleep(startAt, endAt, adjusted)
+                        statusMessage = "Sleep saved."
+                    }
+                )
+            }
+
+            editSleepDay?.let { day ->
+                val zone = ZoneId.systemDefault()
+                val estimate = if (day.startAt != null && day.endAt != null) {
+                    SleepEstimate(day.startAt, day.endAt)
+                } else {
+                    val sleepStart = day.date.atTime(23, 0).atZone(zone).toInstant()
+                    val sleepEnd = day.date.plusDays(1).atTime(7, 0).atZone(zone).toInstant()
+                    SleepEstimate(sleepStart, sleepEnd)
+                }
+                TraceSleepDialog(
+                    estimate = estimate,
+                    onDismiss = { editSleepDay = null },
+                    onSave = { startAt, endAt, _ ->
+                        if (day.sessionId != null) {
+                            launcherViewModel.updateSleepSession(day.sessionId, startAt, endAt)
+                        } else {
+                            launcherViewModel.recordSleepSession(startAt, endAt)
+                        }
+                        editSleepDay = null
                         statusMessage = "Sleep saved."
                     }
                 )

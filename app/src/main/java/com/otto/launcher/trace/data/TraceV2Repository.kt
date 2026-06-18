@@ -66,11 +66,34 @@ class TraceV2Repository(
                     .firstOrNull { it.startAt.atZone(zoneId).toLocalDate() == date }
                 WeeklySleepDay(
                     date = date,
+                    sessionId = session?.id,
                     startAt = session?.startAt,
                     endAt = session?.endAt
                 )
             }
         }
+    }
+
+    suspend fun recordSleepSession(startAt: Instant, endAt: Instant) = withContext(Dispatchers.IO) {
+        val now = clock.instant()
+        dao.upsertSleepSession(
+            V2SleepSessionEntity(
+                id = UUID.randomUUID().toString(),
+                startAt = startAt,
+                endAt = endAt,
+                source = "MANUAL",
+                targetStartLocalTime = null,
+                targetWakeLocalTime = null,
+                healthConnectId = null,
+                createdAt = now,
+                updatedAt = now
+            )
+        )
+    }
+
+    suspend fun updateSleepSession(id: String, startAt: Instant, endAt: Instant) = withContext(Dispatchers.IO) {
+        val existing = dao.sleepSession(id) ?: return@withContext
+        dao.upsertSleepSession(existing.copy(startAt = startAt, endAt = endAt, updatedAt = clock.instant()))
     }
 
     suspend fun backfillLegacyIfNeeded() = withContext(Dispatchers.IO) {

@@ -154,6 +154,9 @@ interface TraceV2Dao {
     @Query("SELECT * FROM sleep_session WHERE endAt IS NULL ORDER BY startAt DESC LIMIT 1")
     suspend fun openSleepSession(): V2SleepSessionEntity?
 
+    @Query("SELECT * FROM sleep_session WHERE id = :id")
+    suspend fun sleepSession(id: String): V2SleepSessionEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSleepSession(session: V2SleepSessionEntity)
 

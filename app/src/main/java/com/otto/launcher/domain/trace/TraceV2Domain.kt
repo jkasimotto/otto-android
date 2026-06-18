@@ -36,6 +36,7 @@ data class TodayLedgerState(
 
 data class WeeklySleepDay(
     val date: LocalDate,
+    val sessionId: String?,
     val startAt: Instant?,
     val endAt: Instant?
 )

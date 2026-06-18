@@ -10,6 +10,7 @@ import com.otto.launcher.data.time.TimeLedgerRepository
 import com.otto.launcher.data.usage.UsageStatsRepository
 import com.otto.launcher.domain.command.CommandResolver
 import com.otto.launcher.domain.command.CommandResult
+import java.time.Instant
 import com.otto.launcher.domain.mode.OttoMode
 import com.otto.launcher.domain.policy.AppDescriptor
 import com.otto.launcher.domain.policy.AppPolicy
@@ -173,6 +174,14 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             traceRepository.startSleep()
             onStarted()
         }
+    }
+
+    fun recordSleepSession(startAt: Instant, endAt: Instant, onDone: () -> Unit = {}) {
+        viewModelScope.launch { traceRepository.recordSleepSession(startAt, endAt); onDone() }
+    }
+
+    fun updateSleepSession(id: String, startAt: Instant, endAt: Instant, onDone: () -> Unit = {}) {
+        viewModelScope.launch { traceRepository.updateSleepSession(id, startAt, endAt); onDone() }
     }
 
     fun endSleep(onSaved: (Int?) -> Unit) {
