@@ -5,6 +5,7 @@ import com.otto.launcher.domain.goals.GoalSettings
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.domain.trace.TodayLedgerState
+import com.otto.launcher.domain.trace.WeeklySleepDay
 import com.otto.launcher.domain.usage.TodayUsageSummary
 import com.otto.launcher.trace.domain.TraceType
 import java.time.Clock
@@ -16,6 +17,7 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 class TraceV2Repository(
@@ -50,6 +52,25 @@ class TraceV2Repository(
 
     fun observeOpenInbox(): Flow<List<InboxItemEntity>> {
         return dao.observeInboxItems(InboxState.OPEN)
+    }
+
+    fun observeWeeklySleep(): Flow<List<WeeklySleepDay>> {
+        val today = LocalDate.now(clock)
+        val start = today.minusDays(6).atStartOfDay(zoneId).toInstant()
+        val end = today.plusDays(1).atStartOfDay(zoneId).toInstant()
+        return dao.observeSleepSessionsOverlapping(start, end).map { sessions ->
+            (0L..6L).map { daysAgo ->
+                val date = today.minusDays(6 - daysAgo)
+                val session = sessions
+                    .filter { it.endAt != null }
+                    .firstOrNull { it.startAt.atZone(zoneId).toLocalDate() == date }
+                WeeklySleepDay(
+                    date = date,
+                    startAt = session?.startAt,
+                    endAt = session?.endAt
+                )
+            }
+        }
     }
 
     suspend fun backfillLegacyIfNeeded() = withContext(Dispatchers.IO) {

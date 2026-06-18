@@ -1,6 +1,7 @@
 package com.otto.launcher.ui.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -40,8 +42,11 @@ import com.otto.launcher.domain.time.DayPlanMode
 import com.otto.launcher.domain.time.TimeCategoryIds
 import com.otto.launcher.domain.time.TimeLedgerCalculator
 import com.otto.launcher.domain.time.displayLabel
+import com.otto.launcher.domain.trace.WeeklySleepDay
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 enum class FastCaptureAction {
@@ -125,13 +130,10 @@ fun HomeScreenV2(
                             )
                         }
                     }
-                    TodayLedger(
-                        state = state,
-                        onLedgerAction = onLedgerAction
-                    )
-                    FastCaptureRow(
-                        onAction = onFastCapture,
-                        onLongPress = onFastCaptureLongPress
+                    SleepPanel(
+                        weeklySleep = state.weeklySleep,
+                        phoneUsageText = state.ledger.phoneText,
+                        onLogSleep = { onLedgerAction(LedgerAction.SLEEP) }
                     )
                 }
             }
@@ -340,6 +342,132 @@ fun CommandBar(
             }
         }
     )
+}
+
+@Composable
+fun SleepPanel(
+    weeklySleep: List<WeeklySleepDay>,
+    phoneUsageText: String,
+    onLogSleep: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Sleep",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Log",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable(onClick = onLogSleep)
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            weeklySleep.forEach { day ->
+                SleepDayRow(day = day, onTap = onLogSleep)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            Text(
+                text = "Phone",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.width(78.dp)
+            )
+            Text(
+                text = phoneUsageText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun SleepDayRow(day: WeeklySleepDay, onTap: () -> Unit) {
+    val isToday = day.date == LocalDate.now()
+    val dayLabel = if (isToday) "Today" else day.date.format(DateTimeFormatter.ofPattern("EEE"))
+    val barColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+    val emptyColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = dayLabel,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isToday) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(42.dp)
+        )
+
+        // Chart bar spanning 20:00–12:00 (16h window across midnight)
+        val windowStartMinutes = 20 * 60  // 20:00
+        val windowMinutes = 16 * 60       // 16 hours
+
+        Canvas(
+            modifier = Modifier
+                .weight(1f)
+                .height(10.dp)
+        ) {
+            val w = size.width
+            val h = size.height
+
+            if (day.startAt == null || day.endAt == null) {
+                drawRect(color = emptyColor, size = size)
+            } else {
+                drawRect(color = emptyColor, size = size)
+                val zone = ZoneId.systemDefault()
+                val startLocal = day.startAt.atZone(zone).toLocalTime()
+                val endLocal = day.endAt.atZone(zone).toLocalTime()
+
+                fun minutesFromWindowStart(t: LocalTime): Int {
+                    val m = t.hour * 60 + t.minute
+                    return if (m >= windowStartMinutes) m - windowStartMinutes
+                           else m + (24 * 60 - windowStartMinutes)
+                }
+
+                val s = (minutesFromWindowStart(startLocal).toFloat() / windowMinutes).coerceIn(0f, 1f)
+                val e = (minutesFromWindowStart(endLocal).toFloat() / windowMinutes).coerceIn(0f, 1f)
+
+                if (e > s) {
+                    drawRect(
+                        color = barColor,
+                        topLeft = androidx.compose.ui.geometry.Offset(s * w, 0f),
+                        size = androidx.compose.ui.geometry.Size((e - s) * w, h)
+                    )
+                }
+            }
+        }
+
+        val durationText = if (day.startAt != null && day.endAt != null) {
+            val mins = Duration.between(day.startAt, day.endAt).toMinutes().toInt()
+            val h = mins / 60
+            val m = mins % 60
+            if (h > 0) "${h}h ${m.toString().padStart(2, '0')}m" else "${m}m"
+        } else {
+            "—"
+        }
+        Text(
+            text = durationText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(56.dp)
+        )
+    }
 }
 
 @Composable

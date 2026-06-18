@@ -2,6 +2,7 @@ package com.otto.launcher.domain.trace
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 
 enum class TraceCaptureType {
     FOOD,
@@ -31,5 +32,11 @@ data class TodayLedgerState(
     val phoneText: String,
     val activeSleepStartAt: Instant?,
     val unresolvedFoodCount: Int
+)
+
+data class WeeklySleepDay(
+    val date: LocalDate,
+    val startAt: Instant?,
+    val endAt: Instant?
 )
 
