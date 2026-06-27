@@ -3,6 +3,26 @@ package com.otto.launcher.domain.trace
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
+
+/**
+ * The calendar day a sleep session belongs to in the weekly chart: the evening the sleep began.
+ * A session that starts after midnight but before midday (e.g. a 02:00 bedtime) is the continuation
+ * of the previous evening's night, so it maps to the day before its start date. Without this pivot an
+ * after-midnight bedtime lands on the following day's row, which is the bug behind editing a day's
+ * sleep to an after-midnight time and watching it jump to the next day.
+ */
+fun sleepNightDate(startAt: Instant, zoneId: ZoneId): LocalDate {
+    val local = startAt.atZone(zoneId)
+    return if (local.toLocalTime() < SLEEP_NIGHT_PIVOT) {
+        local.toLocalDate().minusDays(1)
+    } else {
+        local.toLocalDate()
+    }
+}
+
+/** Bedtimes from midday onward count as that day's night; earlier starts belong to the prior night. */
+private val SLEEP_NIGHT_PIVOT: LocalTime = LocalTime.NOON
 
 enum class TraceCaptureType {
     FOOD,

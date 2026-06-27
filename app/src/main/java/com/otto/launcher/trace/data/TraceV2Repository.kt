@@ -6,6 +6,7 @@ import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.domain.trace.TodayLedgerState
 import com.otto.launcher.domain.trace.WeeklySleepDay
+import com.otto.launcher.domain.trace.sleepNightDate
 import com.otto.launcher.domain.usage.TodayUsageSummary
 import com.otto.launcher.trace.domain.TraceType
 import java.time.Clock
@@ -63,7 +64,7 @@ class TraceV2Repository(
                 val date = today.minusDays(6 - daysAgo)
                 val session = sessions
                     .filter { it.endAt != null }
-                    .firstOrNull { it.startAt.atZone(zoneId).toLocalDate() == date }
+                    .firstOrNull { sleepNightDate(it.startAt, zoneId) == date }
                 WeeklySleepDay(
                     date = date,
                     sessionId = session?.id,
