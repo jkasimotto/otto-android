@@ -15,6 +15,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.SystemClock
 import android.os.UserManager
+import android.view.inputmethod.InputMethodManager
 import androidx.core.content.ContextCompat
 import java.security.SecureRandom
 import java.time.DayOfWeek
@@ -110,7 +111,11 @@ object OttoPolicyController {
         "com.facebook.mlite",
         "messenger",
         "com.google.android.apps.maps",
-        "maps"
+        "maps",
+        "com.google.android.inputmethod.latin",
+        "inputmethod",
+        "keyboard",
+        "gboard"
     )
 
     fun isBlockedApp(packageName: String): Boolean {
@@ -149,6 +154,15 @@ object OttoPolicyController {
         return lockdownAllowedHints.any(haystack::contains)
     }
 
+    /** Lowercased package names of every installed input method, so keyboards survive lockdown. */
+    private fun inputMethodPackageKeys(context: Context): Set<String> {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            ?: return emptySet()
+        return runCatching {
+            imm.inputMethodList.mapNotNull { it.packageName?.lowercase(Locale.US) }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
     /**
      * When a lockdown timer is running, suspend and hide every launchable app outside the allowlist.
      * Returns true if a lockdown is active (callers should skip the normal blocked/time-gate logic).
@@ -174,10 +188,15 @@ object OttoPolicyController {
         }
 
         val ownPackage = context.packageName
+        // Keyboards (and any installed IME) must keep working during lockdown, otherwise the allowed
+        // apps like messages are unusable: suspending an app also disables its IME service.
+        val imePackages = inputMethodPackageKeys(context)
         val toLock = loadLauncherApps(context)
             .map { it.packageName }
             .filter { pkg ->
-                !pkg.equals(ownPackage, ignoreCase = true) && !isLockdownAllowed(packageManager, pkg)
+                !pkg.equals(ownPackage, ignoreCase = true) &&
+                    pkg.lowercase(Locale.US) !in imePackages &&
+                    !isLockdownAllowed(packageManager, pkg)
             }
             .distinct()
 
