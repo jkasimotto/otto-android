@@ -14,6 +14,7 @@ import com.otto.launcher.domain.time.TimeBlockSource
 import com.otto.launcher.domain.time.TimeCategoryKind
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
+import com.otto.launcher.domain.trace.MemoState
 import com.otto.launcher.trace.domain.MealSlot
 import com.otto.launcher.trace.domain.TraceConfidence
 import com.otto.launcher.trace.domain.TraceSource
@@ -43,9 +44,10 @@ import java.time.LocalTime
         TimeBudgetEntity::class,
         TimeBlockEntity::class,
         WellbeingPulseEntity::class,
-        AppTimeMappingEntity::class
+        AppTimeMappingEntity::class,
+        VoiceMemoEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(TraceConverters::class)
@@ -66,6 +68,7 @@ abstract class TraceDatabase : RoomDatabase() {
                 )
                     .addMigrations(MIGRATION_1_2)
                     .addMigrations(MIGRATION_2_3)
+                    .addMigrations(MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }
@@ -337,6 +340,28 @@ abstract class TraceDatabase : RoomDatabase() {
                 )
             }
         }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `voice_memo` (
+                        `id` TEXT NOT NULL,
+                        `audioUri` TEXT NOT NULL,
+                        `durationMs` INTEGER,
+                        `sizeBytes` INTEGER,
+                        `capturedAt` INTEGER NOT NULL,
+                        `state` TEXT NOT NULL,
+                        `transcript` TEXT,
+                        `processedAt` INTEGER,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_voice_memo_state` ON `voice_memo` (`state`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_voice_memo_capturedAt` ON `voice_memo` (`capturedAt`)")
+            }
+        }
     }
 }
 
@@ -400,6 +425,12 @@ class TraceConverters {
 
     @TypeConverter
     fun stringToInboxState(value: String?): InboxState? = value?.let(InboxState::valueOf)
+
+    @TypeConverter
+    fun memoStateToString(value: MemoState?): String? = value?.name
+
+    @TypeConverter
+    fun stringToMemoState(value: String?): MemoState? = value?.let(MemoState::valueOf)
 
     @TypeConverter
     fun timeCategoryKindToString(value: TimeCategoryKind?): String? = value?.name

@@ -228,6 +228,7 @@ private fun LauncherScreen(
     val traceViewModel: TraceViewModel = viewModel()
     val launcherViewModel: LauncherViewModel = viewModel()
     val traceState by traceViewModel.uiState.collectAsState()
+    val queuedMemoCount by traceViewModel.queuedMemoCount.collectAsState()
     val homeState by launcherViewModel.uiState.collectAsState()
     var tapCount by remember { mutableStateOf(0) }
     var tapTimeoutJob by remember { mutableStateOf<Job?>(null) }
@@ -236,6 +237,7 @@ private fun LauncherScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var voiceHudVisible by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
+    var isMemoRecording by remember { mutableStateOf(false) }
     var isTranscribing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var pendingPermissionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -316,6 +318,7 @@ private fun LauncherScreen(
     val processingLabel = when {
         isUpdating -> "SYNCING"
         isTranscribing -> "TRANSCRIBING"
+        isMemoRecording -> "RECORDING"
         isRecording -> "LISTENING"
         else -> manualProcessingLabel
     }
@@ -458,6 +461,44 @@ private fun LauncherScreen(
             pendingPermissionAction = start
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
+    }
+
+    fun startVoiceMemoRecording() {
+        val start = {
+            val result = voiceManager.startRecording()
+            if (result) {
+                isMemoRecording = true
+                isRecording = true
+                voiceHudVisible = true
+                statusMessage = "Recording note..."
+            } else {
+                statusMessage = "Unable to access microphone."
+                isMemoRecording = false
+                isRecording = false
+                voiceHudVisible = false
+            }
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            start()
+        } else {
+            pendingPermissionAction = start
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    fun stopVoiceMemoRecording() {
+        val file = voiceManager.stopRecording()
+        isMemoRecording = false
+        isRecording = false
+        voiceHudVisible = false
+        if (file == null) {
+            statusMessage = "No audio captured."
+            return
+        }
+        traceViewModel.recordVoiceMemo(file)
+        statusMessage = "Note queued."
     }
 
     fun openTraceCamera(isDrinkOnly: Boolean) {
@@ -824,7 +865,11 @@ private fun LauncherScreen(
                         .imePadding(),
                     onTap = {
                         if (isRecording) {
-                            stopRecordingAndTranscribe()
+                            if (isMemoRecording) {
+                                stopVoiceMemoRecording()
+                            } else {
+                                stopRecordingAndTranscribe()
+                            }
                         }
                     }
                 )
@@ -1373,6 +1418,11 @@ private fun LauncherScreen(
                         traceCaptureSheetVisible = false
                         traceSleepVisible = true
                     },
+                    onRecordMemo = {
+                        traceCaptureSheetVisible = false
+                        startVoiceMemoRecording()
+                    },
+                    queuedMemoCount = queuedMemoCount,
                     onToday = {
                         traceCaptureSheetVisible = false
                         traceTodayVisible = true

@@ -9,6 +9,7 @@ import com.otto.launcher.domain.time.TimeBlockSource
 import com.otto.launcher.domain.time.TimeCategoryKind
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
+import com.otto.launcher.domain.trace.MemoState
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -155,6 +156,24 @@ data class InboxItemEntity(
     val state: InboxState,
     val createdAt: Instant,
     val reviewedAt: Instant?
+)
+
+@Entity(
+    tableName = "voice_memo",
+    indices = [
+        Index("state"),
+        Index("capturedAt")
+    ]
+)
+data class VoiceMemoEntity(
+    @PrimaryKey val id: String,
+    val audioUri: String,
+    val durationMs: Long?,
+    val sizeBytes: Long?,
+    val capturedAt: Instant,
+    val state: MemoState,
+    val transcript: String?,
+    val processedAt: Instant?
 )
 
 @Entity(

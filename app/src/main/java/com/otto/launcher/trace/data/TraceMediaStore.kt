@@ -3,6 +3,7 @@ package com.otto.launcher.trace.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import java.io.File
@@ -60,6 +61,40 @@ class TraceMediaStore(private val context: Context) {
             sizeBytes = file.length().takeIf { it > 0L },
             sha256 = sha256(file)
         )
+    }
+
+    /**
+     * Moves a freshly recorded voice memo out of the volatile recorder temp file (cacheDir, which
+     * the OS may clear) into durable app-private storage, and reads its duration. Used by the voice
+     * memo queue, which keeps raw audio for later processing instead of transcribing at capture.
+     */
+    suspend fun persistAudio(tempFile: File): PersistedAudio = withContext(Dispatchers.IO) {
+        val dest = File(audioDir(), "trace_audio_${UUID.randomUUID()}.m4a")
+        tempFile.inputStream().use { input ->
+            dest.outputStream().use { output -> input.copyTo(output) }
+        }
+        tempFile.delete()
+        PersistedAudio(
+            path = dest.absolutePath,
+            durationMs = readDurationMs(dest),
+            sizeBytes = dest.length().takeIf { it > 0L }
+        )
+    }
+
+    private fun readDurationMs(file: File): Long? {
+        return runCatching {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            } finally {
+                retriever.release()
+            }
+        }.getOrNull()
+    }
+
+    private fun audioDir(): File {
+        return File(appContext.filesDir, "trace/audio").apply { mkdirs() }
     }
 
     private fun mediaDir(): File {
@@ -138,3 +173,10 @@ class TraceMediaStore(private val context: Context) {
             .withZone(ZoneId.systemDefault())
     }
 }
+
+/** Result of moving a recorded voice memo into durable private storage. */
+data class PersistedAudio(
+    val path: String,
+    val durationMs: Long?,
+    val sizeBytes: Long?
+)

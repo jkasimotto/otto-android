@@ -2,6 +2,7 @@ package com.otto.launcher.trace.data
 
 import android.content.Context
 import android.net.Uri
+import com.otto.launcher.domain.trace.MemoState
 import com.otto.launcher.trace.domain.DailySummary
 import com.otto.launcher.trace.domain.DataCoverage
 import com.otto.launcher.trace.domain.MealSlot
@@ -74,6 +75,25 @@ class TraceRepository(
         val media = mediaStore.importImage(uri, now)
         insertPhotoTrace(media, isDrinkOnly, TraceSource.PHOTO_PICKER, now)
     }
+
+    /** Persists a recorded voice memo as raw audio in the queue for later processing. */
+    suspend fun recordVoiceMemo(tempFile: File) = withContext(Dispatchers.IO) {
+        val audio = mediaStore.persistAudio(tempFile)
+        v2Dao.upsertVoiceMemo(
+            VoiceMemoEntity(
+                id = UUID.randomUUID().toString(),
+                audioUri = audio.path,
+                durationMs = audio.durationMs,
+                sizeBytes = audio.sizeBytes,
+                capturedAt = clock.instant(),
+                state = MemoState.QUEUED,
+                transcript = null,
+                processedAt = null
+            )
+        )
+    }
+
+    fun observeQueuedMemoCount(): Flow<Int> = v2Dao.observeVoiceMemoCount(MemoState.QUEUED)
 
     suspend fun recordWeight(kilograms: Double) = withContext(Dispatchers.IO) {
         val now = clock.instant()

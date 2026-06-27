@@ -38,6 +38,14 @@ class TraceViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyState()
         )
 
+    val queuedMemoCount: StateFlow<Int> = repository.observeQueuedMemoCount()
+        .catch { emit(0) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0
+        )
+
     fun createCameraImageFile(): File = repository.createCameraImageFile()
 
     fun onLauncherVisible() {
@@ -57,6 +65,13 @@ class TraceViewModel(application: Application) : AndroidViewModel(application) {
     fun importPhoto(uri: Uri, isDrinkOnly: Boolean) {
         viewModelScope.launch {
             repository.importPhoto(uri, isDrinkOnly)
+            refresh()
+        }
+    }
+
+    fun recordVoiceMemo(tempFile: File) {
+        viewModelScope.launch {
+            repository.recordVoiceMemo(tempFile)
             refresh()
         }
     }

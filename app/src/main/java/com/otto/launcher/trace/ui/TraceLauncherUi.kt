@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.LocalDrink
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Restaurant
@@ -136,6 +137,8 @@ fun TraceCaptureSheet(
     onConfirmSleep: () -> Unit,
     onWeight: () -> Unit,
     onSleep: () -> Unit,
+    onRecordMemo: () -> Unit,
+    queuedMemoCount: Int,
     onToday: () -> Unit,
     onSettings: () -> Unit
 ) {
@@ -153,6 +156,13 @@ fun TraceCaptureSheet(
                         label = "Save sleep estimate",
                         detail = state.nextAction.detail,
                         onClick = onConfirmSleep
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TraceSmallButton(
+                        Icons.Filled.Mic,
+                        if (queuedMemoCount > 0) "Record note ($queuedMemoCount)" else "Record note",
+                        onRecordMemo
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

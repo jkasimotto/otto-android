@@ -44,6 +44,18 @@ enum class InboxState {
     ARCHIVED
 }
 
+/**
+ * Lifecycle of a captured voice memo. Memos are recorded as raw audio and held in the queue
+ * (QUEUED) until a later "processing" phase transcribes and folds them into a daily log
+ * (PROCESSED), or the user drops one (DISCARDED). Capture and storage only set QUEUED today;
+ * the other states exist so processing can be added without a schema migration.
+ */
+enum class MemoState {
+    QUEUED,
+    PROCESSED,
+    DISCARDED
+}
+
 data class TodayLedgerState(
     val date: LocalDate,
     val sleepText: String,

@@ -9,6 +9,7 @@ import com.otto.launcher.domain.policy.AppTier
 import com.otto.launcher.domain.time.BudgetPeriod
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
+import com.otto.launcher.domain.trace.MemoState
 import java.time.Instant
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
@@ -201,6 +202,24 @@ interface TraceV2Dao {
         """
     )
     suspend fun updateInboxState(id: String, state: InboxState, reviewedAt: Instant?)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertVoiceMemo(memo: VoiceMemoEntity)
+
+    @Query(
+        """
+        SELECT * FROM voice_memo
+        WHERE state = :state
+        ORDER BY capturedAt ASC
+        """
+    )
+    fun observeVoiceMemos(state: MemoState): Flow<List<VoiceMemoEntity>>
+
+    @Query("SELECT COUNT(*) FROM voice_memo WHERE state = :state")
+    fun observeVoiceMemoCount(state: MemoState): Flow<Int>
+
+    @Query("DELETE FROM voice_memo WHERE id = :id")
+    suspend fun deleteVoiceMemo(id: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertHealthConnectMapping(mapping: HealthConnectMappingEntity)
