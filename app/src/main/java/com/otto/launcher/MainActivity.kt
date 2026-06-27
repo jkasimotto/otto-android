@@ -256,6 +256,11 @@ private fun LauncherScreen(
     var feedbackVisible by remember { mutableStateOf(false) }
     var feedbackText by remember { mutableStateOf("") }
     var feedbackSending by remember { mutableStateOf(false) }
+    val installedVersionName = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "dev"
+    }
     var greyscaleEnabled by remember { mutableStateOf(context.isGreyscaleEnabled()) }
 
     // Secret notes gesture state: 7-tap version, wait 3s, 7-tap again
@@ -1181,11 +1186,7 @@ private fun LauncherScreen(
                                 val note = feedbackText
                                 feedbackSending = true
                                 scope.launch {
-                                    val version = runCatching {
-                                        context.packageManager
-                                            .getPackageInfo(context.packageName, 0).versionName
-                                    }.getOrDefault("dev")
-                                    val result = FeedbackSubmitter.submit(note, version ?: "dev")
+                                    val result = FeedbackSubmitter.submit(note, installedVersionName)
                                     feedbackSending = false
                                     result
                                         .onSuccess {
@@ -1323,6 +1324,7 @@ private fun LauncherScreen(
                         MaintenanceSection.LOGS -> "Logs"
                         MaintenanceSection.UPDATE -> "Update"
                     },
+                    currentVersion = installedVersionName,
                     onDismiss = { maintenanceSection = null },
                     onOpenSystemSettings = { context.openSystemSettings() },
                     onOpenUsageAccess = { launcherViewModel.openUsageAccessSettings() },
