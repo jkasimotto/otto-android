@@ -13,6 +13,7 @@ import com.otto.launcher.domain.policy.AppPolicyEngine
 import com.otto.launcher.domain.policy.AppTier
 import com.otto.launcher.domain.time.AppUsageSlice
 import com.otto.launcher.domain.time.UsageTimeSnapshot
+import com.otto.launcher.domain.usage.DailyPhoneUsage
 import com.otto.launcher.domain.usage.TodayUsageSummary
 import java.time.Clock
 import java.time.DayOfWeek
@@ -62,6 +63,32 @@ class UsageStatsRepository(
                 .toInstant()
             emit(usageSlices(start, clock.instant()))
             delay(60_000)
+        }
+    }
+
+    /**
+     * Total foreground minutes for each of the last 7 days (oldest first, ending today). Empty when
+     * usage access is off. queryAndAggregateUsageStats only totals a whole range, so each day is
+     * queried separately to get a per-day breakdown for the weekly chart.
+     */
+    fun observeWeeklyDailyUsage(): Flow<List<DailyPhoneUsage>> = flow {
+        while (true) {
+            emit(weeklyDailyUsage())
+            delay(60_000)
+        }
+    }
+
+    fun weeklyDailyUsage(): List<DailyPhoneUsage> {
+        if (!hasUsageAccess()) return emptyList()
+        val today = LocalDate.now(clock)
+        val now = clock.instant()
+        return (0L..6L).map { offset ->
+            val date = today.minusDays(6 - offset)
+            val start = date.atStartOfDay(zoneId).toInstant()
+            val end = if (date == today) now else date.plusDays(1).atStartOfDay(zoneId).toInstant()
+            val stats = usageStatsManager.queryAndAggregateUsageStats(start.toEpochMilli(), end.toEpochMilli())
+            val totalMs = stats.values.sumOf { it.totalTimeInForeground.coerceAtLeast(0L) }
+            DailyPhoneUsage(date = date, totalMinutes = (totalMs / 60_000L).toInt())
         }
     }
 

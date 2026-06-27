@@ -1328,18 +1328,6 @@ private fun LauncherScreen(
                     onDismiss = { maintenanceSection = null },
                     onOpenSystemSettings = { context.openSystemSettings() },
                     onOpenUsageAccess = { launcherViewModel.openUsageAccessSettings() },
-                    onOpenTimeBudget = {
-                        maintenanceSection = null
-                        timeBudgetVisible = true
-                    },
-                    onOpenTimeReview = {
-                        maintenanceSection = null
-                        todayV2Visible = true
-                    },
-                    onOpenWeeklyTimeReview = {
-                        maintenanceSection = null
-                        weekV2Visible = true
-                    },
                     onOpenLogs = {
                         refreshDiagnostics()
                         diagnosticsVisible = true

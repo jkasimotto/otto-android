@@ -16,9 +16,6 @@ fun SettingsHome(
     onDismiss: () -> Unit,
     onOpenSystemSettings: () -> Unit,
     onOpenUsageAccess: () -> Unit,
-    onOpenTimeBudget: () -> Unit,
-    onOpenTimeReview: () -> Unit,
-    onOpenWeeklyTimeReview: () -> Unit,
     onOpenLogs: () -> Unit,
     onSendFeedback: () -> Unit,
     onUpdate: () -> Unit
@@ -35,9 +32,6 @@ fun SettingsHome(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 TextButton(onClick = onOpenSystemSettings) { Text("Settings") }
-                TextButton(onClick = onOpenTimeBudget) { Text("Time Ledger") }
-                TextButton(onClick = onOpenTimeReview) { Text("Review today") }
-                TextButton(onClick = onOpenWeeklyTimeReview) { Text("Review week") }
                 TextButton(onClick = onOpenUsageAccess) { Text("Usage access") }
                 TextButton(onClick = onOpenLogs) { Text("Logs") }
                 TextButton(onClick = onSendFeedback) { Text("Send feedback") }

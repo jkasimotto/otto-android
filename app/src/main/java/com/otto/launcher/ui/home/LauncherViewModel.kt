@@ -26,6 +26,7 @@ import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.domain.trace.TodayLedgerState
 import com.otto.launcher.domain.trace.WeeklySleepDay
+import com.otto.launcher.domain.usage.DailyPhoneUsage
 import com.otto.launcher.trace.data.FoodEntryEntity
 import com.otto.launcher.trace.data.InboxItemEntity
 import com.otto.launcher.trace.data.TraceV2Repository
@@ -47,7 +48,8 @@ data class HomeUiState(
     val unresolvedFood: List<FoodEntryEntity>,
     val inbox: List<InboxItemEntity>,
     val policies: List<AppPolicy>,
-    val weeklySleep: List<WeeklySleepDay>
+    val weeklySleep: List<WeeklySleepDay>,
+    val weeklyPhoneUsage: List<DailyPhoneUsage>
 )
 
 class LauncherViewModel(application: Application) : AndroidViewModel(application) {
@@ -68,6 +70,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val weeklyTimeLedger = timeLedgerRepository.observeWeeklyLedger(weeklyUsageSlices)
     private val dailyTimeReview = timeLedgerRepository.observeDailyReview(todayUsageSlices)
     private val weeklySleep = traceRepository.observeWeeklySleep()
+    private val weeklyPhoneUsage = usageStatsRepository.observeWeeklyDailyUsage()
+    private val weeklyData = combine(weeklySleep, weeklyPhoneUsage) { sleep, usage -> sleep to usage }
 
     private val traceAndTime = combine(
         ledger,
@@ -90,8 +94,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         traceAndTime,
         traceRepository.observeOpenInbox(),
         policyRepository.observePolicies(),
-        weeklySleep
-    ) { baseMode, traceAndTimeState, inbox, policies, weeklySleepDays ->
+        weeklyData
+    ) { baseMode, traceAndTimeState, inbox, policies, weekly ->
+        val (weeklySleepDays, weeklyPhoneUsageDays) = weekly
         HomeUiState(
             mode = if (traceAndTimeState.ledger.activeSleepStartAt != null) OttoMode.SLEEP else baseMode,
             ledger = traceAndTimeState.ledger,
@@ -101,7 +106,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             unresolvedFood = traceAndTimeState.unresolvedFood,
             inbox = inbox,
             policies = policies,
-            weeklySleep = weeklySleepDays
+            weeklySleep = weeklySleepDays,
+            weeklyPhoneUsage = weeklyPhoneUsageDays
         )
     }
         .catch { emit(emptyState()) }
@@ -240,7 +246,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             unresolvedFood = emptyList(),
             inbox = emptyList(),
             policies = emptyList(),
-            weeklySleep = emptyList()
+            weeklySleep = emptyList(),
+            weeklyPhoneUsage = emptyList()
         )
     }
 
