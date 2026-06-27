@@ -18,6 +18,7 @@ fun SettingsHome(
     onOpenTimeReview: () -> Unit,
     onOpenWeeklyTimeReview: () -> Unit,
     onOpenLogs: () -> Unit,
+    onSendFeedback: () -> Unit,
     onUpdate: () -> Unit
 ) {
     AlertDialog(
@@ -32,6 +33,7 @@ fun SettingsHome(
                 TextButton(onClick = onOpenWeeklyTimeReview) { Text("Review week") }
                 TextButton(onClick = onOpenUsageAccess) { Text("Usage access") }
                 TextButton(onClick = onOpenLogs) { Text("Logs") }
+                TextButton(onClick = onSendFeedback) { Text("Send feedback") }
                 TextButton(onClick = onUpdate) { Text("Update") }
             }
         }

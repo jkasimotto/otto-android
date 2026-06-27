@@ -253,6 +253,9 @@ private fun LauncherScreen(
     var manualProcessingNonce by remember { mutableStateOf(0) }
     var diagnosticsVisible by remember { mutableStateOf(false) }
     var diagnosticsText by remember { mutableStateOf("") }
+    var feedbackVisible by remember { mutableStateOf(false) }
+    var feedbackText by remember { mutableStateOf("") }
+    var feedbackSending by remember { mutableStateOf(false) }
     var greyscaleEnabled by remember { mutableStateOf(context.isGreyscaleEnabled()) }
 
     // Secret notes gesture state: 7-tap version, wait 3s, 7-tap again
@@ -1164,6 +1167,77 @@ private fun LauncherScreen(
                 )
             }
 
+            if (feedbackVisible) {
+                AlertDialog(
+                    onDismissRequest = {
+                        if (!feedbackSending) {
+                            feedbackVisible = false
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = !feedbackSending && feedbackText.isNotBlank(),
+                            onClick = {
+                                val note = feedbackText
+                                feedbackSending = true
+                                scope.launch {
+                                    val version = runCatching {
+                                        context.packageManager
+                                            .getPackageInfo(context.packageName, 0).versionName
+                                    }.getOrDefault("dev")
+                                    val result = FeedbackSubmitter.submit(note, version ?: "dev")
+                                    feedbackSending = false
+                                    result
+                                        .onSuccess {
+                                            feedbackText = ""
+                                            feedbackVisible = false
+                                            Toast.makeText(context, "Feedback sent.", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .onFailure {
+                                            Toast.makeText(
+                                                context,
+                                                "Couldn't send feedback. Check connection or token.",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                }
+                            }
+                        ) {
+                            Text(if (feedbackSending) "Sending..." else "Send")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            enabled = !feedbackSending,
+                            onClick = { feedbackVisible = false }
+                        ) {
+                            Text("Cancel")
+                        }
+                    },
+                    title = { Text("Send feedback") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (!FeedbackSubmitter.isConfigured) {
+                                Text(
+                                    text = "No feedback token configured. Add GITHUB_FEEDBACK_TOKEN to .env and rebuild.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            OutlinedTextField(
+                                value = feedbackText,
+                                onValueChange = { feedbackText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 4,
+                                maxLines = 12,
+                                enabled = !feedbackSending,
+                                placeholder = { Text("What's working, what's not, what you want...") }
+                            )
+                        }
+                    }
+                )
+            }
+
             if (noteCaptureVisible) {
                 NoteCaptureSheet(
                     onDismiss = { noteCaptureVisible = false },
@@ -1267,6 +1341,10 @@ private fun LauncherScreen(
                     onOpenLogs = {
                         refreshDiagnostics()
                         diagnosticsVisible = true
+                    },
+                    onSendFeedback = {
+                        maintenanceSection = null
+                        feedbackVisible = true
                     },
                     onUpdate = { startOttoUpdate() }
                 )
@@ -2229,6 +2307,10 @@ private object OttoConfig {
         readBuildConfigField("GROQ_API_KEY") ?: System.getenv("GROQ_API_KEY").orEmpty()
     }
 
+    val githubFeedbackToken: String by lazy {
+        readBuildConfigField("GITHUB_FEEDBACK_TOKEN") ?: System.getenv("GITHUB_FEEDBACK_TOKEN").orEmpty()
+    }
+
     private fun readBuildConfigField(name: String): String? {
         return runCatching {
             val clazz = Class.forName(BUILD_CONFIG_CLASS)
@@ -2242,6 +2324,46 @@ private object HttpClientProvider {
         OkHttpClient.Builder()
             .callTimeout(60, TimeUnit.SECONDS)
             .build()
+    }
+}
+
+/**
+ * Sends in-app feedback as a GitHub issue so it can be read off-device.
+ * Each note becomes an issue labeled "feedback" in jkasimotto/otto-android.
+ * No-ops gracefully when no token is configured (mirrors voice degrading without GROQ_API_KEY).
+ */
+private object FeedbackSubmitter {
+    private const val ISSUES_URL = "https://api.github.com/repos/jkasimotto/otto-android/issues"
+
+    val isConfigured: Boolean get() = OttoConfig.githubFeedbackToken.isNotBlank()
+
+    suspend fun submit(note: String, versionName: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val token = OttoConfig.githubFeedbackToken
+            if (token.isBlank()) throw IOException("No feedback token configured")
+
+            val trimmed = note.trim()
+            val title = trimmed.lineSequence().first().take(70).ifBlank { "Feedback" }
+            val payload = JSONObject().apply {
+                put("title", title)
+                put("body", "$trimmed\n\n---\nSent from Otto v$versionName")
+                put("labels", JSONArray().put("feedback"))
+            }
+
+            val request = Request.Builder()
+                .url(ISSUES_URL)
+                .header("Authorization", "Bearer $token")
+                .header("Accept", "application/vnd.github+json")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            HttpClientProvider.client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Feedback failed with ${response.code}")
+                }
+            }
+            Unit
+        }
     }
 }
 
