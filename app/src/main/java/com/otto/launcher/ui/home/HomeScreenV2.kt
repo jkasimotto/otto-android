@@ -46,6 +46,7 @@ import com.otto.launcher.domain.time.TimeLedgerCalculator
 import com.otto.launcher.domain.time.displayLabel
 import com.otto.launcher.domain.trace.WeeklySleepDay
 import com.otto.launcher.domain.usage.DailyPhoneUsage
+import com.otto.launcher.domain.weather.DailyWeather
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -85,6 +86,7 @@ fun HomeScreenV2(
     onOttoLongPress: () -> Unit,
     onWake: () -> Unit,
     onEmergency: () -> Unit,
+    weeklyWeather: List<DailyWeather>,
     greyscaleEnabled: Boolean,
     onToggleGreyscale: () -> Unit,
     modifier: Modifier = Modifier
@@ -146,6 +148,7 @@ fun HomeScreenV2(
                         weeklySleep = state.weeklySleep,
                         weeklyPhoneUsage = state.weeklyPhoneUsage,
                         weeklyNightUnlocks = state.weeklyNightUnlocks,
+                        weeklyWeather = weeklyWeather,
                         onLogSleep = { onLedgerAction(LedgerAction.SLEEP) },
                         onTapDay = onTapSleepDay
                     )
@@ -385,6 +388,7 @@ fun SleepPanel(
     weeklySleep: List<WeeklySleepDay>,
     weeklyPhoneUsage: List<DailyPhoneUsage>,
     weeklyNightUnlocks: Map<LocalDate, List<Instant>>,
+    weeklyWeather: List<DailyWeather>,
     onLogSleep: () -> Unit,
     onTapDay: (WeeklySleepDay) -> Unit
 ) {
@@ -417,6 +421,36 @@ fun SleepPanel(
             SleepTimeAxis()
         }
         PhoneUsageWeekChart(usage = weeklyPhoneUsage, targetMinutes = 60)
+        WeatherWeekRow(weather = weeklyWeather)
+    }
+}
+
+@Composable
+private fun WeatherWeekRow(weather: List<DailyWeather>) {
+    if (weather.isEmpty()) return
+    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            weather.forEach { day ->
+                Text(
+                    text = day.symbol,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            weather.forEach { day ->
+                Text(
+                    text = day.date.format(DateTimeFormatter.ofPattern("EEEEE")),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp),
+                    color = labelColor,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
     }
 }
 

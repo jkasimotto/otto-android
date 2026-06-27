@@ -101,7 +101,9 @@ import com.otto.launcher.domain.command.AppCommandResult
 import com.otto.launcher.domain.command.CommandResult
 import com.otto.launcher.domain.command.MaintenanceSection
 import com.otto.launcher.domain.command.OttoCommand
+import com.otto.launcher.data.weather.WeatherRepository
 import com.otto.launcher.domain.mode.OttoMode
+import com.otto.launcher.domain.weather.DailyWeather
 import com.otto.launcher.domain.policy.AppDescriptor
 import com.otto.launcher.domain.policy.AppGate
 import com.otto.launcher.domain.time.TimeCategoryIds
@@ -263,6 +265,8 @@ private fun LauncherScreen(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "dev"
     }
+    val weatherRepository = remember { WeatherRepository(context) }
+    var weeklyWeather by remember { mutableStateOf<List<DailyWeather>>(emptyList()) }
     var greyscaleEnabled by remember { mutableStateOf(context.isGreyscaleEnabled()) }
     var greyscaleDisableVisible by remember { mutableStateOf(false) }
     var greyscaleDisableCode by remember { mutableStateOf("") }
@@ -375,6 +379,28 @@ private fun LauncherScreen(
             traceCameraDrinkOnly = drinkOnly
         } else if (!granted) {
             statusMessage = "Camera permission is required for photo capture."
+        }
+    }
+
+    fun loadWeather() {
+        scope.launch {
+            weeklyWeather = weatherRepository.upcomingForecast()
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) loadWeather()
+    }
+
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            loadWeather()
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
     }
 
@@ -875,6 +901,7 @@ private fun LauncherScreen(
                     }
                     context.openSystemSettings()
                 },
+                weeklyWeather = weeklyWeather,
                 greyscaleEnabled = greyscaleEnabled,
                 onToggleGreyscale = {
                     if (greyscaleEnabled) {
