@@ -419,55 +419,58 @@ private fun PhoneUsageWeekChart(usage: List<DailyPhoneUsage>, targetMinutes: Int
             )
         }
         if (usage.isEmpty()) {
+            // No early return here: returning out of a @Composable content lambda corrupts the slot
+            // table and crashes the launcher on open. Use if/else so the groups always balance.
             Text(
                 text = "usage access off",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            return@Column
-        }
-        // Scale so the target line and the worst day both stay on-chart.
-        val maxMinutes = (usage.maxOf { it.totalMinutes }).coerceAtLeast(targetMinutes * 2)
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(44.dp)
-        ) {
-            val w = size.width
-            val h = size.height
-            val slotWidth = w / usage.size
-            val barWidth = slotWidth * 0.5f
+        } else {
+            // Scale so the target line and the worst day both stay on-chart.
+            val maxMinutes = (usage.maxOf { it.totalMinutes }).coerceAtLeast(targetMinutes * 2)
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+            ) {
+                val w = size.width
+                val h = size.height
+                val slotWidth = w / usage.size
+                val barWidth = slotWidth * 0.5f
 
-            usage.forEachIndexed { index, day ->
-                val barHeight = (day.totalMinutes.toFloat() / maxMinutes) * h
-                val left = index * slotWidth + (slotWidth - barWidth) / 2f
-                drawRect(
-                    color = if (day.totalMinutes > targetMinutes) overColor else barColor,
-                    topLeft = androidx.compose.ui.geometry.Offset(left, h - barHeight),
-                    size = androidx.compose.ui.geometry.Size(barWidth, barHeight)
+                usage.forEachIndexed { index, day ->
+                    val barHeight = (day.totalMinutes.toFloat() / maxMinutes) * h
+                    val left = index * slotWidth + (slotWidth - barWidth) / 2f
+                    drawRect(
+                        color = if (day.totalMinutes > targetMinutes) overColor else barColor,
+                        topLeft = androidx.compose.ui.geometry.Offset(left, h - barHeight),
+                        size = androidx.compose.ui.geometry.Size(barWidth, barHeight)
+                    )
+                }
+
+                val targetY = h - (targetMinutes.toFloat() / maxMinutes) * h
+                drawLine(
+                    color = targetColor,
+                    start = androidx.compose.ui.geometry.Offset(0f, targetY),
+                    end = androidx.compose.ui.geometry.Offset(w, targetY),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                        floatArrayOf(0f, 6.dp.toPx())
+                    )
                 )
             }
-
-            val targetY = h - (targetMinutes.toFloat() / maxMinutes) * h
-            drawLine(
-                color = targetColor,
-                start = androidx.compose.ui.geometry.Offset(0f, targetY),
-                end = androidx.compose.ui.geometry.Offset(w, targetY),
-                strokeWidth = 1.dp.toPx(),
-                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                    floatArrayOf(3.dp.toPx(), 3.dp.toPx())
-                )
-            )
-        }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            usage.forEach { day ->
-                Text(
-                    text = day.date.format(DateTimeFormatter.ofPattern("EEEEE")),
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp),
-                    color = labelColor,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f)
-                )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                usage.forEach { day ->
+                    Text(
+                        text = day.date.format(DateTimeFormatter.ofPattern("EEEEE")),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp),
+                        color = labelColor,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
@@ -481,6 +484,7 @@ private fun SleepDayRow(day: WeeklySleepDay, marks: List<Instant>, onTap: () -> 
     val emptyColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     val targetColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
     val markColor = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
+    val nowColor = androidx.compose.ui.graphics.Color(0xFFFFD54F)
 
     Row(
         modifier = Modifier
@@ -568,6 +572,25 @@ private fun SleepDayRow(day: WeeklySleepDay, marks: List<Instant>, onTap: () -> 
                         strokeWidth = 1.5.dp.toPx()
                     )
                 }
+            }
+
+            // Current-time line on whichever night row contains "now" (yellow). Nothing midday,
+            // when the clock sits outside the 20:00-12:00 window.
+            val nowDate = LocalDate.now()
+            val nowTime = LocalTime.now()
+            val nowNightDate = when {
+                nowTime >= LocalTime.of(20, 0) -> nowDate
+                nowTime < LocalTime.of(12, 0) -> nowDate.minusDays(1)
+                else -> null
+            }
+            if (nowNightDate == day.date) {
+                val nowX = windowFraction(nowTime.hour * 60 + nowTime.minute) * w
+                drawLine(
+                    color = nowColor,
+                    start = androidx.compose.ui.geometry.Offset(nowX, 0f),
+                    end = androidx.compose.ui.geometry.Offset(nowX, h),
+                    strokeWidth = 1.5.dp.toPx()
+                )
             }
         }
 
