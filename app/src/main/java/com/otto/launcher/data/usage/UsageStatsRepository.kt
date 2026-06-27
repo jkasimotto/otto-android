@@ -1,6 +1,7 @@
 package com.otto.launcher.data.usage
 
 import android.app.AppOpsManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
@@ -17,7 +18,9 @@ import com.otto.launcher.domain.usage.DailyPhoneUsage
 import com.otto.launcher.domain.usage.TodayUsageSummary
 import java.time.Clock
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.delay
@@ -90,6 +93,56 @@ class UsageStatsRepository(
             val totalMs = stats.values.sumOf { it.totalTimeInForeground.coerceAtLeast(0L) }
             DailyPhoneUsage(date = date, totalMinutes = (totalMs / 60_000L).toInt())
         }
+    }
+
+    /**
+     * Phone unlocks (KEYGUARD_HIDDEN) over the last 7 nights, grouped by the night they belong to so
+     * the sleep chart can mark each pickup. A night row spans 20:00 of its date to 12:00 the next day,
+     * matching SleepDayRow, so evening unlocks map to that date and after-midnight ones to the date
+     * before. Bursts within 3 minutes collapse to one mark. Empty when usage access is off or on
+     * pre-28 devices (the unlock event is unavailable there).
+     */
+    fun observeWeeklyNightUnlocks(): Flow<Map<LocalDate, List<Instant>>> = flow {
+        while (true) {
+            emit(weeklyNightUnlocks())
+            delay(60_000)
+        }
+    }
+
+    fun weeklyNightUnlocks(): Map<LocalDate, List<Instant>> {
+        if (!hasUsageAccess() || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return emptyMap()
+        val today = LocalDate.now(clock)
+        val rangeStart = today.minusDays(6).atTime(20, 0).atZone(zoneId).toInstant()
+        val now = clock.instant()
+
+        val unlocks = ArrayList<Long>()
+        val events = usageStatsManager.queryEvents(rangeStart.toEpochMilli(), now.toEpochMilli())
+        val event = UsageEvents.Event()
+        while (events.getNextEvent(event)) {
+            if (event.eventType == UsageEvents.Event.KEYGUARD_HIDDEN) unlocks.add(event.timeStamp)
+        }
+        unlocks.sort()
+
+        // Collapse bursts so one restless moment is a single mark, not a cluster.
+        val kept = ArrayList<Instant>()
+        var lastKept = Long.MIN_VALUE
+        for (ts in unlocks) {
+            if (ts - lastKept >= 3 * 60_000L) {
+                kept.add(Instant.ofEpochMilli(ts))
+                lastKept = ts
+            }
+        }
+
+        val sevenDays = (0L..6L).map { today.minusDays(it) }.toSet()
+        return kept.mapNotNull { inst ->
+            val local = inst.atZone(zoneId)
+            val nightDate = when {
+                local.toLocalTime() >= LocalTime.of(20, 0) -> local.toLocalDate()
+                local.toLocalTime() < LocalTime.of(12, 0) -> local.toLocalDate().minusDays(1)
+                else -> null  // daytime use, outside the chart window
+            }
+            nightDate?.takeIf { it in sevenDays }?.let { it to inst }
+        }.groupBy({ it.first }, { it.second })
     }
 
     fun hasUsageAccess(): Boolean {

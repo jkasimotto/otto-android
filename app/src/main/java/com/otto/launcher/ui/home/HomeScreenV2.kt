@@ -47,6 +47,7 @@ import com.otto.launcher.domain.time.displayLabel
 import com.otto.launcher.domain.trace.WeeklySleepDay
 import com.otto.launcher.domain.usage.DailyPhoneUsage
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -140,6 +141,7 @@ fun HomeScreenV2(
                     SleepPanel(
                         weeklySleep = state.weeklySleep,
                         weeklyPhoneUsage = state.weeklyPhoneUsage,
+                        weeklyNightUnlocks = state.weeklyNightUnlocks,
                         onLogSleep = { onLedgerAction(LedgerAction.SLEEP) },
                         onTapDay = onTapSleepDay
                     )
@@ -356,6 +358,7 @@ fun CommandBar(
 fun SleepPanel(
     weeklySleep: List<WeeklySleepDay>,
     weeklyPhoneUsage: List<DailyPhoneUsage>,
+    weeklyNightUnlocks: Map<LocalDate, List<Instant>>,
     onLogSleep: () -> Unit,
     onTapDay: (WeeklySleepDay) -> Unit
 ) {
@@ -379,7 +382,11 @@ fun SleepPanel(
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             weeklySleep.forEach { day ->
-                SleepDayRow(day = day, onTap = { onTapDay(day) })
+                SleepDayRow(
+                    day = day,
+                    marks = weeklyNightUnlocks[day.date].orEmpty(),
+                    onTap = { onTapDay(day) }
+                )
             }
             SleepTimeAxis()
         }
@@ -467,12 +474,13 @@ private fun PhoneUsageWeekChart(usage: List<DailyPhoneUsage>, targetMinutes: Int
 }
 
 @Composable
-private fun SleepDayRow(day: WeeklySleepDay, onTap: () -> Unit) {
+private fun SleepDayRow(day: WeeklySleepDay, marks: List<Instant>, onTap: () -> Unit) {
     val isToday = day.date == LocalDate.now()
     val dayLabel = if (isToday) "Today" else day.date.format(DateTimeFormatter.ofPattern("EEE"))
     val barColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
     val emptyColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     val targetColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+    val markColor = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
 
     Row(
         modifier = Modifier
@@ -544,6 +552,22 @@ private fun SleepDayRow(day: WeeklySleepDay, onTap: () -> Unit) {
                     strokeWidth = 1.dp.toPx(),
                     pathEffect = targetDash
                 )
+            }
+
+            // Each phone unlock through the night, drawn on top so disruptions over the sleep bar show.
+            val markZone = ZoneId.systemDefault()
+            marks.forEach { inst ->
+                val local = inst.atZone(markZone).toLocalTime()
+                val frac = windowFraction(local.hour * 60 + local.minute)
+                if (frac in 0f..1f) {
+                    val x = frac * w
+                    drawLine(
+                        color = markColor,
+                        start = androidx.compose.ui.geometry.Offset(x, 0f),
+                        end = androidx.compose.ui.geometry.Offset(x, h),
+                        strokeWidth = 1.5.dp.toPx()
+                    )
+                }
             }
         }
 

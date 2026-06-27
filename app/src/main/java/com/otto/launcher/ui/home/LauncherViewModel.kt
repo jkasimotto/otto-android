@@ -49,7 +49,8 @@ data class HomeUiState(
     val inbox: List<InboxItemEntity>,
     val policies: List<AppPolicy>,
     val weeklySleep: List<WeeklySleepDay>,
-    val weeklyPhoneUsage: List<DailyPhoneUsage>
+    val weeklyPhoneUsage: List<DailyPhoneUsage>,
+    val weeklyNightUnlocks: Map<LocalDate, List<Instant>> = emptyMap()
 )
 
 class LauncherViewModel(application: Application) : AndroidViewModel(application) {
@@ -71,7 +72,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val dailyTimeReview = timeLedgerRepository.observeDailyReview(todayUsageSlices)
     private val weeklySleep = traceRepository.observeWeeklySleep()
     private val weeklyPhoneUsage = usageStatsRepository.observeWeeklyDailyUsage()
-    private val weeklyData = combine(weeklySleep, weeklyPhoneUsage) { sleep, usage -> sleep to usage }
+    private val weeklyNightUnlocks = usageStatsRepository.observeWeeklyNightUnlocks()
+    private val weeklyData = combine(weeklySleep, weeklyPhoneUsage, weeklyNightUnlocks) { sleep, usage, unlocks ->
+        Triple(sleep, usage, unlocks)
+    }
 
     private val traceAndTime = combine(
         ledger,
@@ -96,7 +100,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         policyRepository.observePolicies(),
         weeklyData
     ) { baseMode, traceAndTimeState, inbox, policies, weekly ->
-        val (weeklySleepDays, weeklyPhoneUsageDays) = weekly
+        val (weeklySleepDays, weeklyPhoneUsageDays, nightUnlocks) = weekly
         HomeUiState(
             mode = if (traceAndTimeState.ledger.activeSleepStartAt != null) OttoMode.SLEEP else baseMode,
             ledger = traceAndTimeState.ledger,
@@ -107,7 +111,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             inbox = inbox,
             policies = policies,
             weeklySleep = weeklySleepDays,
-            weeklyPhoneUsage = weeklyPhoneUsageDays
+            weeklyPhoneUsage = weeklyPhoneUsageDays,
+            weeklyNightUnlocks = nightUnlocks
         )
     }
         .catch { emit(emptyState()) }
