@@ -484,7 +484,9 @@ private fun SleepDayRow(day: WeeklySleepDay, marks: List<Instant>, onTap: () -> 
     val emptyColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     val targetColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
     val markColor = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
-    val nowColor = androidx.compose.ui.graphics.Color(0xFFFFD54F)
+    // Red as a warning: if the "now" line is visible inside the sleep window, the phone is in use
+    // when it should not be.
+    val nowColor = MaterialTheme.colorScheme.error
 
     Row(
         modifier = Modifier
