@@ -30,7 +30,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -428,31 +435,38 @@ fun SleepPanel(
 @Composable
 private fun WeatherWeekRow(weather: List<DailyWeather>) {
     if (weather.isEmpty()) return
-    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            weather.forEach { day ->
-                Text(
-                    text = day.symbol,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            weather.forEach { day ->
-                Text(
-                    text = day.date.format(DateTimeFormatter.ofPattern("EEEEE")),
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp),
-                    color = labelColor,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+    // The weekday letters under each icon were redundant with the rest of the home layout, so the
+    // row is just the icons. Emoji glyphs render in full colour by default; desaturate them so they
+    // sit quietly in the dark theme instead of drawing the eye.
+    Row(modifier = Modifier.fillMaxWidth().grayscale()) {
+        weather.forEach { day ->
+            Text(
+                text = day.symbol,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
+
+/**
+ * Renders the content into an offscreen layer and applies a zero-saturation colour matrix, turning
+ * colour emoji into greyscale. Used for the weather icons so they match the muted home palette;
+ * a plain Text colour cannot recolour a multi-colour emoji glyph.
+ */
+private fun Modifier.grayscale(): Modifier = this.then(
+    Modifier.drawWithContent {
+        val paint = Paint().apply {
+            colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+        }
+        drawIntoCanvas { canvas ->
+            canvas.saveLayer(Rect(Offset.Zero, size), paint)
+            drawContent()
+            canvas.restore()
+        }
+    }
+)
 
 @Composable
 private fun PhoneUsageWeekChart(usage: List<DailyPhoneUsage>, targetMinutes: Int) {
