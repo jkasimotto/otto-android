@@ -69,9 +69,12 @@ class TraceViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun recordVoiceMemo(tempFile: File) {
+    fun recordVoiceMemo(
+        tempFile: File,
+        transcriber: (suspend (File) -> Result<String>)? = null
+    ) {
         viewModelScope.launch {
-            repository.recordVoiceMemo(tempFile)
+            repository.recordVoiceMemo(tempFile, transcriber)
             refresh()
         }
     }

@@ -18,6 +18,8 @@ object PolicyRuntime {
         val appContext = context.applicationContext
         val controller = DeviceOwnerController(appContext)
         if (!controller.isDeviceOwner()) return
+        // During a timed lockdown OttoPolicyController owns all package state; don't fight it.
+        if (com.otto.launcher.OttoPolicyController.isLockdownActive(appContext)) return
 
         val dao = TraceDatabase.get(appContext).traceV2Dao()
         repairCriticalPeoplePolicies(dao.appPolicies(), clock.instant()).takeIf { it.isNotEmpty() }?.let {

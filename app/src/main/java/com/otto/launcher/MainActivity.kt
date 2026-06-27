@@ -162,7 +162,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        launcherApps = loadLauncherApps(packageManager)
+        launcherApps = loadLauncherApps(this)
         val versionLabel = currentVersionName()
         OttoDiagnostics.info(
             applicationContext,
@@ -209,7 +209,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshLauncherApps(forceRefresh: Boolean = false) {
-        launcherApps = loadLauncherApps(packageManager, forceRefresh)
+        launcherApps = loadLauncherApps(this, forceRefresh)
     }
 }
 
@@ -264,6 +264,10 @@ private fun LauncherScreen(
         }.getOrNull() ?: "dev"
     }
     var greyscaleEnabled by remember { mutableStateOf(context.isGreyscaleEnabled()) }
+    var greyscaleDisableVisible by remember { mutableStateOf(false) }
+    var greyscaleDisableCode by remember { mutableStateOf("") }
+    var greyscaleDisableInput by remember { mutableStateOf("") }
+    var greyscaleDisableError by remember { mutableStateOf<String?>(null) }
 
     // Secret notes gesture state: 7-tap version, wait 3s, 7-tap again
     var secretTapPhase by remember { mutableStateOf(0) } // 0=idle, 1=first-7-done, 2=passkey-prompt, 3=unlocked
@@ -497,8 +501,15 @@ private fun LauncherScreen(
             statusMessage = "No audio captured."
             return
         }
-        traceViewModel.recordVoiceMemo(file)
-        statusMessage = "Note queued."
+        // Transcribe with Groq Whisper when a key is configured; otherwise just queue the audio.
+        val transcriber: (suspend (File) -> Result<String>)? =
+            if (OttoConfig.hasGroqKey) {
+                { audio -> voiceManager.transcribe(audio, deleteAfter = false) }
+            } else {
+                null
+            }
+        traceViewModel.recordVoiceMemo(file, transcriber)
+        statusMessage = if (transcriber != null) "Note saved." else "Note queued."
     }
 
     fun openTraceCamera(isDrinkOnly: Boolean) {
@@ -596,6 +607,18 @@ private fun LauncherScreen(
     }
 
     fun handleAppResult(result: AppCommandResult) {
+        // Time-gated apps (Slack, browsers) outside their allowed hours: tapping anywhere shows the
+        // 30-letter unlock code instead of a dead-end message. Covers the hidden-Slack tile too.
+        val gatedApp = findAppInfo(result)
+        if (gatedApp != null && OttoPolicyController.requiresLaunchGateCode(context, gatedApp.packageName)) {
+            gatedLaunchApp = gatedApp
+            launchGateInput = ""
+            launchGateCode = OttoPolicyController.newLaunchGateCode(context, gatedApp.packageName).orEmpty()
+            launchGateError = null
+            statusMessage = OttoPolicyController.launchGatePrompt(context, gatedApp.packageName)
+            query = ""
+            return
+        }
         when (val gate = result.gate) {
             AppGate.Allowed -> {
                 val app = findAppInfo(result)
@@ -852,6 +875,23 @@ private fun LauncherScreen(
                     }
                     context.openSystemSettings()
                 },
+                greyscaleEnabled = greyscaleEnabled,
+                onToggleGreyscale = {
+                    if (greyscaleEnabled) {
+                        // Turning greyscale off is deliberately high-friction: type a code.
+                        greyscaleDisableCode = newDistractionGateCode()
+                        greyscaleDisableInput = ""
+                        greyscaleDisableError = null
+                        greyscaleDisableVisible = true
+                    } else {
+                        if (context.setGreyscaleEnabled(true)) {
+                            greyscaleEnabled = true
+                            statusMessage = "Greyscale on."
+                        } else {
+                            statusMessage = "Couldn't enable greyscale."
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -988,6 +1028,82 @@ private fun LauncherScreen(
                                 )
                             )
                             launchGateError?.let { error ->
+                                Text(
+                                    text = error,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+
+            if (greyscaleDisableVisible) {
+                AlertDialog(
+                    onDismissRequest = {
+                        greyscaleDisableVisible = false
+                        greyscaleDisableInput = ""
+                        greyscaleDisableError = null
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                if (greyscaleDisableInput == greyscaleDisableCode) {
+                                    if (context.setGreyscaleEnabled(false)) {
+                                        greyscaleEnabled = false
+                                        statusMessage = "Greyscale off."
+                                    } else {
+                                        statusMessage = "Couldn't disable greyscale."
+                                    }
+                                    greyscaleDisableVisible = false
+                                    greyscaleDisableInput = ""
+                                    greyscaleDisableError = null
+                                } else {
+                                    greyscaleDisableError = "Code does not match."
+                                }
+                            }
+                        ) {
+                            Text("Disable")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                greyscaleDisableVisible = false
+                                greyscaleDisableInput = ""
+                                greyscaleDisableError = null
+                            }
+                        ) {
+                            Text("Keep greyscale")
+                        }
+                    },
+                    title = { Text("Disable greyscale?") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Type the code to turn colour back on.")
+                            Text(
+                                text = OttoPolicyController.formatLaunchGateCode(greyscaleDisableCode),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = greyscaleDisableInput,
+                                onValueChange = {
+                                    greyscaleDisableInput = OttoPolicyController
+                                        .normalizeLaunchGateCode(it)
+                                        .take(greyscaleDisableCode.length)
+                                    greyscaleDisableError = null
+                                },
+                                label = { Text("Code") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Characters,
+                                    imeAction = ImeAction.Done
+                                )
+                            )
+                            greyscaleDisableError?.let { error ->
                                 Text(
                                     text = error,
                                     color = MaterialTheme.colorScheme.error,
@@ -1370,6 +1486,17 @@ private fun LauncherScreen(
                         MaintenanceSection.UPDATE -> "Update"
                     },
                     currentVersion = installedVersionName,
+                    lockdownRemaining = if (OttoPolicyController.isLockdownActive(context)) {
+                        formatMinutesHuman((OttoPolicyController.lockdownRemainingMillis(context) / 60_000L).toInt())
+                    } else {
+                        null
+                    },
+                    onStartLockdown = { minutes ->
+                        OttoPolicyController.startLockdown(context, minutes)
+                        maintenanceSection = null
+                        applyV2PolicyNow()
+                        statusMessage = "Locked down for ${formatMinutesHuman(minutes)}."
+                    },
                     onDismiss = { maintenanceSection = null },
                     onOpenSystemSettings = { context.openSystemSettings() },
                     onOpenUsageAccess = { launcherViewModel.openUsageAccessSettings() },
@@ -1736,7 +1863,7 @@ private object LauncherAppsCache {
     @Volatile
     private var cacheExpiresAtElapsedRealtime = 0L
 
-    fun load(packageManager: PackageManager, forceRefresh: Boolean = false): List<AppInfo> {
+    fun load(context: Context, forceRefresh: Boolean = false): List<AppInfo> {
         val now = SystemClock.elapsedRealtime()
         val cached = cachedApps
         if (!forceRefresh && cached != null && now < cacheExpiresAtElapsedRealtime) {
@@ -1749,7 +1876,7 @@ private object LauncherAppsCache {
             if (!forceRefresh && synchronizedCached != null && synchronizedNow < cacheExpiresAtElapsedRealtime) {
                 synchronizedCached
             } else {
-                buildLauncherApps(packageManager).also { freshApps ->
+                buildLauncherApps(context).also { freshApps ->
                     cachedApps = freshApps
                     cacheExpiresAtElapsedRealtime = synchronizedNow + CACHE_TTL_MS
                 }
@@ -1770,23 +1897,66 @@ internal fun invalidateLauncherAppsCache() {
 }
 
 internal fun loadLauncherApps(
-    packageManager: PackageManager,
+    context: Context,
     forceRefresh: Boolean = false
 ): List<AppInfo> {
-    return LauncherAppsCache.load(packageManager, forceRefresh)
+    return LauncherAppsCache.load(context, forceRefresh)
 }
 
-private fun buildLauncherApps(packageManager: PackageManager): List<AppInfo> {
+private fun buildLauncherApps(context: Context): List<AppInfo> {
+    val packageManager = context.packageManager
     val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)
     }
 
-    val launcherApps = queryActivities(packageManager, launcherIntent)
-
-    return launcherApps
+    val visible = queryActivities(packageManager, launcherIntent)
         .distinctBy { it.activityName }
         .filter { shouldDisplayApp(packageManager, it) }
+
+    return injectHiddenGatedApps(context, visible)
         .sortedBy { it.label.lowercase(Locale.getDefault()) }
+}
+
+private const val GATED_APP_CACHE_PREFS = "otto_gated_app_cache"
+private const val GATED_APP_CACHE_DELIMITER = "\u0001"
+
+/**
+ * Time-gated apps (currently Slack) are hidden during their blocked window so they leave the
+ * system recents list. Hidden apps vanish from the launcher query too, which would remove the only
+ * path to the unlock-code dialog. To keep them reachable, cache each gated app's launch details
+ * while it is visible, then re-inject a tile from that cache while it is hidden. Tapping the tile
+ * routes through the after-hours gate, which unhides the app on a correct code.
+ */
+private fun injectHiddenGatedApps(context: Context, visible: List<AppInfo>): List<AppInfo> {
+    // During lockdown nothing outside the allowlist should be reachable, not even a gated tile.
+    if (OttoPolicyController.isLockdownActive(context)) return visible
+    val gatedPackages = OttoPolicyController.hideableTimeGatedPackages(context)
+    if (gatedPackages.isEmpty()) return visible
+
+    val prefs = context.getSharedPreferences(GATED_APP_CACHE_PREFS, Context.MODE_PRIVATE)
+    val visibleByKey = visible.associateBy { it.packageName.lowercase(Locale.US) }
+
+    val editor = prefs.edit()
+    gatedPackages.forEach { pkg ->
+        val app = visibleByKey[pkg.lowercase(Locale.US)] ?: return@forEach
+        if (app.activityName.isNotBlank()) {
+            editor.putString(
+                pkg.lowercase(Locale.US),
+                listOf(app.packageName, app.activityName, app.label).joinToString(GATED_APP_CACHE_DELIMITER)
+            )
+        }
+    }
+    editor.apply()
+
+    val injected = gatedPackages.mapNotNull { pkg ->
+        val key = pkg.lowercase(Locale.US)
+        if (key in visibleByKey) return@mapNotNull null
+        val parts = prefs.getString(key, null)?.split(GATED_APP_CACHE_DELIMITER) ?: return@mapNotNull null
+        if (parts.size != 3) return@mapNotNull null
+        AppInfo(label = parts[2], packageName = parts[0], activityName = parts[1])
+    }
+
+    return visible + injected
 }
 
 private fun queryActivities(
@@ -1857,14 +2027,21 @@ private fun Context.launchApp(appInfo: AppInfo) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
-    runCatching { startActivity(launchIntent) }
-        .onFailure {
-            Toast.makeText(
-                this,
-                getString(R.string.launch_error, appInfo.label),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
+    val launched = runCatching { startActivity(launchIntent) }.isSuccess
+    if (launched) return
+
+    // Fallback by package (e.g. a just-unhidden gated app whose cached activity went stale).
+    val byPackage = packageManager.getLaunchIntentForPackage(appInfo.packageName)
+        ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+    val fallbackLaunched = byPackage != null &&
+        runCatching { startActivity(byPackage) }.isSuccess
+    if (!fallbackLaunched) {
+        Toast.makeText(
+            this,
+            getString(R.string.launch_error, appInfo.label),
+            Toast.LENGTH_SHORT
+        ).show()
+    }
 }
 
 private fun Context.openAppInfo(appInfo: AppInfo) {
@@ -2163,7 +2340,7 @@ private class VoiceTranscriptionManager(private val context: Context) {
         return file?.takeIf { it.exists() && it.length() > 0 }
     }
 
-    suspend fun transcribe(file: File): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun transcribe(file: File, deleteAfter: Boolean = true): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = OttoConfig.groqApiKey
         if (apiKey.isBlank()) {
             return@withContext Result.failure(IllegalStateException("Missing Groq API key."))
@@ -2198,7 +2375,7 @@ private class VoiceTranscriptionManager(private val context: Context) {
                 text
             }
         }
-        file.delete()
+        if (deleteAfter) file.delete()
         result
     }
 
@@ -2346,6 +2523,8 @@ private object OttoConfig {
     val groqApiKey: String by lazy {
         readBuildConfigField("GROQ_API_KEY") ?: System.getenv("GROQ_API_KEY").orEmpty()
     }
+
+    val hasGroqKey: Boolean get() = groqApiKey.isNotBlank()
 
     val githubFeedbackToken: String by lazy {
         readBuildConfigField("GITHUB_FEEDBACK_TOKEN") ?: System.getenv("GITHUB_FEEDBACK_TOKEN").orEmpty()

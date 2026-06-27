@@ -76,19 +76,33 @@ class TraceRepository(
         insertPhotoTrace(media, isDrinkOnly, TraceSource.PHOTO_PICKER, now)
     }
 
-    /** Persists a recorded voice memo as raw audio in the queue for later processing. */
-    suspend fun recordVoiceMemo(tempFile: File) = withContext(Dispatchers.IO) {
+    /**
+     * Persists a recorded voice memo as raw audio. If a [transcriber] is supplied and succeeds,
+     * the memo is stored with its transcript and marked PROCESSED; otherwise it stays QUEUED so a
+     * later run (e.g. once an API key is configured) can transcribe it. The transcriber must not
+     * delete the audio file: the memo keeps its source recording.
+     */
+    suspend fun recordVoiceMemo(
+        tempFile: File,
+        transcriber: (suspend (File) -> Result<String>)? = null
+    ) = withContext(Dispatchers.IO) {
         val audio = mediaStore.persistAudio(tempFile)
+        val transcript = transcriber
+            ?.invoke(File(audio.path))
+            ?.getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val now = clock.instant()
         v2Dao.upsertVoiceMemo(
             VoiceMemoEntity(
                 id = UUID.randomUUID().toString(),
                 audioUri = audio.path,
                 durationMs = audio.durationMs,
                 sizeBytes = audio.sizeBytes,
-                capturedAt = clock.instant(),
-                state = MemoState.QUEUED,
-                transcript = null,
-                processedAt = null
+                capturedAt = now,
+                state = if (transcript != null) MemoState.PROCESSED else MemoState.QUEUED,
+                transcript = transcript,
+                processedAt = if (transcript != null) now else null
             )
         )
     }

@@ -28,6 +28,8 @@ object OttoPolicyController {
     private const val KEY_LEGACY_SLACK_UNLOCKED_UNTIL = "slack_unlocked_until"
     private const val KEY_LAST_TIME_GATED_SUSPENDED_PACKAGES = "last_time_gated_suspended_packages"
     private const val KEY_TIME_GATE_UNLOCKED_UNTIL_PREFIX = "time_gate_unlocked_until_"
+    private const val KEY_LOCKDOWN_UNTIL = "lockdown_until_millis"
+    private const val KEY_LAST_LOCKDOWN_LOCKED_PACKAGES = "last_lockdown_locked_packages"
     private const val LOCK_TASK_FEATURE_QUICK_SETTINGS = 1 shl 7
     private const val AUTO_ENTER_LOCK_TASK = false
     private const val POLICY_REAPPLY_MIN_INTERVAL_MS = 5_000L
@@ -61,7 +63,8 @@ object OttoPolicyController {
         val startHourInclusive: Int,
         val endHourExclusive: Int,
         val challengeCodeLength: Int,
-        val temporaryUnlockDurationMs: Long
+        val temporaryUnlockDurationMs: Long,
+        val hideWhenBlocked: Boolean
     )
 
     val blockedLauncherPackagePrefixes = setOf(
@@ -83,11 +86,117 @@ object OttoPolicyController {
         startHourInclusive = TIME_GATE_START_HOUR_INCLUSIVE,
         endHourExclusive = TIME_GATE_END_HOUR_EXCLUSIVE,
         challengeCodeLength = LAUNCH_GATE_CODE_LENGTH,
-        temporaryUnlockDurationMs = TIME_GATE_UNLOCK_DURATION_MS
+        temporaryUnlockDurationMs = TIME_GATE_UNLOCK_DURATION_MS,
+        hideWhenBlocked = true
+    )
+
+    // Packages that stay usable during a timed lockdown: phone, messages, messenger, maps.
+    // Matched generously against label+package so the device's stock dialer/SMS app is never
+    // accidentally locked away (calls and texts must keep working).
+    private val lockdownAllowedHints = listOf(
+        "dialer",
+        "com.android.phone",
+        "incallui",
+        "com.google.android.dialer",
+        "com.samsung.android.dialer",
+        "phone",
+        "com.google.android.apps.messaging",
+        "com.samsung.android.messaging",
+        "messaging",
+        "messages",
+        ".mms",
+        ".sms",
+        "com.facebook.orca",
+        "com.facebook.mlite",
+        "messenger",
+        "com.google.android.apps.maps",
+        "maps"
     )
 
     fun isBlockedApp(packageName: String): Boolean {
         return packageName.lowercase() in hardBlockedAppPackages
+    }
+
+    fun isLockdownActive(context: Context): Boolean {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return System.currentTimeMillis() < prefs.getLong(KEY_LOCKDOWN_UNTIL, 0L)
+    }
+
+    fun lockdownRemainingMillis(context: Context): Long {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return (prefs.getLong(KEY_LOCKDOWN_UNTIL, 0L) - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    /**
+     * Arms a lockdown for [durationMinutes]: every launchable app except phone/messages/messenger/
+     * maps (and Otto itself) is suspended and hidden until the timer expires. There is no early exit
+     * by design. The caller must trigger a policy apply (e.g. applyPolicies on a background thread)
+     * for it to take effect.
+     */
+    fun startLockdown(context: Context, durationMinutes: Int) {
+        if (durationMinutes <= 0) return
+        val until = System.currentTimeMillis() + durationMinutes * 60_000L
+        context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_LOCKDOWN_UNTIL, until)
+            .apply()
+        markPolicyDirty(packageStateChanged = true)
+    }
+
+    private fun isLockdownAllowed(packageManager: PackageManager, packageName: String): Boolean {
+        val haystack = "${appLabel(packageManager, packageName).orEmpty()} $packageName".lowercase(Locale.US)
+        return lockdownAllowedHints.any(haystack::contains)
+    }
+
+    /**
+     * When a lockdown timer is running, suspend and hide every launchable app outside the allowlist.
+     * Returns true if a lockdown is active (callers should skip the normal blocked/time-gate logic).
+     * When inactive, restores any packages a prior lockdown locked and returns false.
+     */
+    private fun applyLockdownIfActive(
+        dpm: DevicePolicyManager,
+        admin: ComponentName,
+        context: Context,
+        packageManager: PackageManager
+    ): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val previouslyLocked = prefs.getStringSet(KEY_LAST_LOCKDOWN_LOCKED_PACKAGES, emptySet()).orEmpty()
+
+        if (!isLockdownActive(context)) {
+            previouslyLocked.forEach { packageName ->
+                clearPackageState(dpm, admin, packageManager, packageName, clearHidden = true)
+            }
+            if (previouslyLocked.isNotEmpty()) {
+                prefs.edit().remove(KEY_LAST_LOCKDOWN_LOCKED_PACKAGES).apply()
+            }
+            return false
+        }
+
+        val ownPackage = context.packageName
+        val toLock = loadLauncherApps(context)
+            .map { it.packageName }
+            .filter { pkg ->
+                !pkg.equals(ownPackage, ignoreCase = true) && !isLockdownAllowed(packageManager, pkg)
+            }
+            .distinct()
+
+        toLock.forEach { packageName ->
+            runCatching {
+                dpm.setPackagesSuspended(admin, arrayOf(packageName), true)
+                dpm.setApplicationHidden(admin, packageName, true)
+            }
+        }
+        previouslyLocked
+            .filter { it !in toLock }
+            .forEach { packageName ->
+                clearPackageState(dpm, admin, packageManager, packageName, clearHidden = true)
+            }
+
+        prefs.edit()
+            .putStringSet(KEY_LAST_LOCKDOWN_LOCKED_PACKAGES, (previouslyLocked + toLock).toSet())
+            .apply()
+        return true
     }
 
     fun shouldHideFromLauncher(packageName: String): Boolean {
@@ -135,6 +244,17 @@ object OttoPolicyController {
             if (!dpm.isDeviceOwnerApp(appContext.packageName)) return
 
             val packageManager = appContext.packageManager
+
+            // A running lockdown supersedes the normal blocked/time-gate policy: lock everything
+            // except the allowlist and skip the rest.
+            if (applyLockdownIfActive(dpm, admin, appContext, packageManager)) {
+                applyStaticPoliciesIfNeeded(dpm, admin, appContext)
+                applyLockTaskPackagesIfChanged(dpm, admin, appContext)
+                policyStateDirty = false
+                lastPolicyApplyElapsedRealtime = SystemClock.elapsedRealtime()
+                return
+            }
+
             val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val previousBlockedApps = prefs.getStringSet(KEY_LAST_HARD_BLOCKED_APPS, emptySet()).orEmpty()
             val previousAppliedInstalledBlockedApps = prefs
@@ -175,8 +295,14 @@ object OttoPolicyController {
             }
             timeGateRules.forEach { rule ->
                 if (shouldSuspendTimeGatedPackage(appContext, rule)) {
+                    // Hide as well as suspend so the app leaves the system recents/overview list
+                    // and cannot be resumed there outside its allowed hours. The 30-letter unlock
+                    // code unhides it again for a short window.
                     runCatching {
                         dpm.setPackagesSuspended(admin, arrayOf(rule.packageName), true)
+                        if (rule.hideWhenBlocked) {
+                            dpm.setApplicationHidden(admin, rule.packageName, true)
+                        }
                     }.onSuccess {
                         currentTimeGatedSuspendedPackages += rule.packageName
                     }
@@ -186,7 +312,7 @@ object OttoPolicyController {
                         admin = admin,
                         packageManager = packageManager,
                         packageName = rule.packageName,
-                        clearHidden = false
+                        clearHidden = true
                     )
                 }
             }
@@ -198,7 +324,7 @@ object OttoPolicyController {
                         admin = admin,
                         packageManager = packageManager,
                         packageName = packageName,
-                        clearHidden = false
+                        clearHidden = true
                     )
                 }
 
@@ -228,6 +354,17 @@ object OttoPolicyController {
             policyStateDirty = false
             lastPolicyApplyElapsedRealtime = SystemClock.elapsedRealtime()
         }
+    }
+
+    /**
+     * Package names of installed time-gated apps that get fully hidden during their blocked window
+     * (currently just Slack). The launcher uses these to keep a cached tile reachable in search
+     * while the app is hidden, so the unlock-code dialog stays accessible.
+     */
+    fun hideableTimeGatedPackages(context: Context): List<String> {
+        return installedTimeGateRules(context.applicationContext)
+            .filter { it.hideWhenBlocked }
+            .map { it.packageName }
     }
 
     fun requiresLaunchGateCode(context: Context, packageName: String): Boolean {
@@ -396,7 +533,7 @@ object OttoPolicyController {
         admin: ComponentName,
         context: Context
     ) {
-        val allowedPackages = (loadLauncherApps(context.packageManager).map { it.packageName } +
+        val allowedPackages = (loadLauncherApps(context).map { it.packageName } +
             context.packageName +
             ALLOWED_SYSTEM_PACKAGES)
             .distinct()
@@ -442,15 +579,20 @@ object OttoPolicyController {
     }
 
     private fun isPackageInstalled(packageManager: PackageManager, packageName: String): Boolean {
+        // MATCH_UNINSTALLED_PACKAGES so apps this device owner has hidden (setApplicationHidden)
+        // still register as installed, otherwise a hidden gated app looks uninstalled and its
+        // policy stops being managed.
+        val matchFlags = PackageManager.MATCH_DISABLED_COMPONENTS or
+            PackageManager.MATCH_UNINSTALLED_PACKAGES
         return runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 packageManager.getApplicationInfo(
                     packageName,
-                    PackageManager.ApplicationInfoFlags.of(PackageManager.MATCH_DISABLED_COMPONENTS.toLong())
+                    PackageManager.ApplicationInfoFlags.of(matchFlags.toLong())
                 )
             } else {
                 @Suppress("DEPRECATION")
-                packageManager.getApplicationInfo(packageName, PackageManager.MATCH_DISABLED_COMPONENTS)
+                packageManager.getApplicationInfo(packageName, matchFlags)
             }
             true
         }.getOrDefault(false)
@@ -497,7 +639,10 @@ object OttoPolicyController {
             startHourInclusive = TIME_GATE_START_HOUR_INCLUSIVE,
             endHourExclusive = TIME_GATE_END_HOUR_EXCLUSIVE,
             challengeCodeLength = LAUNCH_GATE_CODE_LENGTH,
-            temporaryUnlockDurationMs = TIME_GATE_UNLOCK_DURATION_MS
+            temporaryUnlockDurationMs = TIME_GATE_UNLOCK_DURATION_MS,
+            // Browsers are discovered dynamically by intent and would be unrecoverable once hidden,
+            // so they stay suspended-only; only Slack is fully hidden during its blocked window.
+            hideWhenBlocked = false
         )
     }
 

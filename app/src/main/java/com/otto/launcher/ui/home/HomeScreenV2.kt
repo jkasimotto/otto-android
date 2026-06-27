@@ -85,6 +85,8 @@ fun HomeScreenV2(
     onOttoLongPress: () -> Unit,
     onWake: () -> Unit,
     onEmergency: () -> Unit,
+    greyscaleEnabled: Boolean,
+    onToggleGreyscale: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isSearching = query.isNotBlank()
@@ -109,7 +111,9 @@ fun HomeScreenV2(
             ) {
                 HomeTopBar(
                     state = state,
-                    onOttoLongPress = onOttoLongPress
+                    onOttoLongPress = onOttoLongPress,
+                    greyscaleEnabled = greyscaleEnabled,
+                    onToggleGreyscale = onToggleGreyscale
                 )
                 if (!isSearching) {
                     val modeHeadline = when (state.mode) {
@@ -188,7 +192,9 @@ fun HomeScreenV2(
 @Composable
 private fun HomeTopBar(
     state: HomeUiState,
-    onOttoLongPress: () -> Unit
+    onOttoLongPress: () -> Unit,
+    greyscaleEnabled: Boolean,
+    onToggleGreyscale: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -213,8 +219,28 @@ private fun HomeTopBar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        ModeChip(state = state)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GreyscaleToggle(enabled = greyscaleEnabled, onToggle = onToggleGreyscale)
+            ModeChip(state = state)
+        }
     }
+}
+
+@Composable
+private fun GreyscaleToggle(enabled: Boolean, onToggle: () -> Unit) {
+    Text(
+        text = if (enabled) "Grey ON" else "Grey",
+        style = MaterialTheme.typography.bodySmall,
+        color = if (enabled) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        modifier = Modifier.clickable(onClick = onToggle)
+    )
 }
 
 @Composable
