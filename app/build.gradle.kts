@@ -46,6 +46,15 @@ android {
             "GITHUB_FEEDBACK_TOKEN",
             "\"${feedbackToken.replace("\"", "\\\"")}\""
         )
+
+        // GitHub repo (owner/name) the in-app updater and feedback talk to. Override in .env so a
+        // fork can point at its own repo without editing source. Defaults to the upstream repo.
+        val githubRepo = envValue("OTTO_GITHUB_REPO", "jkasimotto/otto-android")
+        buildConfigField(
+            "String",
+            "OTTO_GITHUB_REPO",
+            "\"${githubRepo.replace("\"", "\\\"")}\""
+        )
     }
 
     buildTypes {

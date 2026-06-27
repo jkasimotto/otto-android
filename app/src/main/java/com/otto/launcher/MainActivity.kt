@@ -2553,6 +2553,11 @@ private object OttoConfig {
 
     val hasGroqKey: Boolean get() = groqApiKey.isNotBlank()
 
+    /** GitHub "owner/name" the updater and feedback target; falls back to the upstream repo. */
+    val githubRepo: String by lazy {
+        (readBuildConfigField("OTTO_GITHUB_REPO") ?: "").ifBlank { "jkasimotto/otto-android" }
+    }
+
     val githubFeedbackToken: String by lazy {
         readBuildConfigField("GITHUB_FEEDBACK_TOKEN") ?: System.getenv("GITHUB_FEEDBACK_TOKEN").orEmpty()
     }
@@ -2575,11 +2580,11 @@ private object HttpClientProvider {
 
 /**
  * Sends in-app feedback as a GitHub issue so it can be read off-device.
- * Each note becomes an issue labeled "feedback" in jkasimotto/otto-android.
+ * Each note becomes an issue labeled "feedback" in the configured OTTO_GITHUB_REPO.
  * No-ops gracefully when no token is configured (mirrors voice degrading without GROQ_API_KEY).
  */
 private object FeedbackSubmitter {
-    private const val ISSUES_URL = "https://api.github.com/repos/jkasimotto/otto-android/issues"
+    private val issuesUrl: String get() = "https://api.github.com/repos/${OttoConfig.githubRepo}/issues"
 
     val isConfigured: Boolean get() = OttoConfig.githubFeedbackToken.isNotBlank()
 
@@ -2589,7 +2594,7 @@ private object FeedbackSubmitter {
             if (token.isBlank()) throw IOException("No feedback token configured")
 
             val trimmed = note.trim()
-            val title = trimmed.lineSequence().first().take(70).ifBlank { "Feedback" }
+            val title = (trimmed.lineSequence().firstOrNull() ?: "").take(70).ifBlank { "Feedback" }
             val payload = JSONObject().apply {
                 put("title", title)
                 put("body", "$trimmed\n\n---\nSent from Otto v$versionName")
@@ -2597,7 +2602,7 @@ private object FeedbackSubmitter {
             }
 
             val request = Request.Builder()
-                .url(ISSUES_URL)
+                .url(issuesUrl)
                 .header("Authorization", "Bearer $token")
                 .header("Accept", "application/vnd.github+json")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
@@ -2614,7 +2619,8 @@ private object FeedbackSubmitter {
 }
 
 private object OttoUpdater {
-    private const val RELEASES_URL = "https://api.github.com/repos/jkasimotto/otto-android/releases/latest"
+    private val releasesUrl: String
+        get() = "https://api.github.com/repos/${OttoConfig.githubRepo}/releases/latest"
     private const val APK_ASSET_NAME = "app-debug.apk"
 
     suspend fun downloadLatestRelease(context: Context): Result<File> = withContext(Dispatchers.IO) {
@@ -2647,7 +2653,7 @@ private object OttoUpdater {
 
     private fun fetchLatestRelease(): ReleaseInfo {
         val request = Request.Builder()
-            .url(RELEASES_URL)
+            .url(releasesUrl)
             .header("Accept", "application/vnd.github+json")
             .build()
 

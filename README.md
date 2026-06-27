@@ -1,6 +1,8 @@
 # Otto Launcher
 
-A minimal Android home screen replacement focused on quickly searching and launching installed apps, with a launcher-native Trace layer for quiet personal evidence capture.
+A minimal Android home screen replacement focused on quickly searching and launching installed apps, with a launcher-native Trace layer for quiet personal evidence capture and an optional device-owner blocking layer for focus.
+
+> Deploying for someone else? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for device-owner setup, optional keys, and the distribution caveats.
 
 ## Features
 - Launcher intent-filter so it can be set as the default home app
@@ -10,6 +12,8 @@ A minimal Android home screen replacement focused on quickly searching and launc
 - Contextual double-tap capture: food camera during meal windows, sleep/weight in the morning, capture sheet otherwise
 - Private food/drink photo capture with CameraX, plus Android Photo Picker import without broad media-library access
 - Manual weight and sleep logging with coverage-based weekly summaries and neutral copy
+- Per-day weather glyphs (free Open-Meteo, current location)
+- Optional device-owner blocking layer: app blocking, timed lockdown, after-hours Slack/browser gating, sticky greyscale, and a website DNS VPN. All of it is a no-op until Otto is provisioned as device owner; the launcher works fully without it.
 - Version label baked into the UI so you can confirm the running build
 
 ## Project structure
@@ -20,7 +24,7 @@ A minimal Android home screen replacement focused on quickly searching and launc
 
 ## Building & running
 1. Open the project in Android Studio Flamingo/ newer and let it sync dependencies. Studio will prompt you to generate a Gradle wrapper if one is missing – accept the prompt or run `gradle wrapper` from the terminal if you have Gradle 8.2+ installed.
-2. Ensure the `.env` file at the repo root contains `GROQ_API_KEY=...` (already copied from `pad/.env`). Gradle injects it into `BuildConfig` so voice transcription + the Groq agent can run.
+2. Optionally copy `.env.example` to `.env` and fill in `GROQ_API_KEY` (voice), `GITHUB_FEEDBACK_TOKEN` (in-app feedback), and `OTTO_GITHUB_REPO` (your fork's repo for updater/feedback). All are optional and degrade gracefully; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Do not ship a public build containing real keys.
 3. Use the **app** run configuration to deploy to an emulator or device (Android 8.0 / API 26+ required). Approve camera permission the first time you capture a Trace photo; microphone permission is still required for voice features if they are re-enabled.
 4. After installation, press the home button and choose **Otto Launcher** as the default home app to test the experience.
 
