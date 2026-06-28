@@ -10,7 +10,9 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
-import android.media.MediaRecorder
+import com.otto.launcher.voice.VoiceRecorder
+import com.otto.launcher.voice.isOttoAssistant
+import com.otto.launcher.voice.registerOttoAsAssistant
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -453,6 +455,15 @@ private fun LauncherScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Claim the assist gesture once per launch so raising the phone and triggering the assistant
+    // jumps straight into a discreet voice note. The slot starts empty on this device; no-ops if
+    // it's already Otto or the write isn't permitted.
+    LaunchedEffect(Unit) {
+        if (!context.isOttoAssistant()) {
+            context.registerOttoAsAssistant()
+        }
     }
 
     val normalizedQuery = remember(query) { query.trim() }
@@ -2351,47 +2362,11 @@ private fun formatMinutesHuman(minutes: Int): String {
 
 private class VoiceTranscriptionManager(private val context: Context) {
     private val client = HttpClientProvider.client
-    private var recorder: MediaRecorder? = null
-    private var outputFile: File? = null
+    private val recorder = VoiceRecorder()
 
-    fun startRecording(): Boolean {
-        stopRecorder(stop = true)
-        var initializedRecorder: MediaRecorder? = null
-        val file = File.createTempFile("otto_voice_", ".m4a", context.cacheDir)
-        val started: Boolean = runCatching {
-            @Suppress("DEPRECATION")
-            val recorder = MediaRecorder().apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(44100)
-                setAudioEncodingBitRate(96000)
-                setOutputFile(file.absolutePath)
-                prepare()
-                start()
-            }
-            initializedRecorder = recorder
-            outputFile = file
-            this.recorder = recorder
-            true
-        }.getOrElse {
-            initializedRecorder?.release()
-            file.delete()
-            outputFile = null
-            false
-        }
-        if (!started) {
-            stopRecorder(stop = false)
-        }
-        return started
-    }
+    fun startRecording(): Boolean = recorder.start(context.cacheDir)
 
-    fun stopRecording(): File? {
-        val file = outputFile
-        stopRecorder(stop = true)
-        outputFile = null
-        return file?.takeIf { it.exists() && it.length() > 0 }
-    }
+    fun stopRecording(): File? = recorder.stop()
 
     suspend fun transcribe(file: File, deleteAfter: Boolean = true): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = OttoConfig.groqApiKey
@@ -2433,24 +2408,7 @@ private class VoiceTranscriptionManager(private val context: Context) {
     }
 
     fun dispose() {
-        stopRecorder(stop = false)
-        outputFile?.delete()
-        outputFile = null
-    }
-
-    private fun stopRecorder(stop: Boolean) {
-        runCatching {
-            recorder?.apply {
-                if (stop) {
-                    try {
-                        stop()
-                    } catch (_: RuntimeException) {
-                    }
-                }
-                release()
-            }
-        }
-        recorder = null
+        recorder.discard()
     }
 
     companion object {
