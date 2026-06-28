@@ -215,6 +215,15 @@ interface TraceV2Dao {
     )
     fun observeVoiceMemos(state: MemoState): Flow<List<VoiceMemoEntity>>
 
+    @Query(
+        """
+        SELECT * FROM voice_memo
+        WHERE state = :state
+        ORDER BY capturedAt ASC
+        """
+    )
+    suspend fun voiceMemos(state: MemoState): List<VoiceMemoEntity>
+
     @Query("SELECT COUNT(*) FROM voice_memo WHERE state = :state")
     fun observeVoiceMemoCount(state: MemoState): Flow<Int>
 

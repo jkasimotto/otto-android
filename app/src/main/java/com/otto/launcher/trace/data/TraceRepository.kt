@@ -1,6 +1,8 @@
 package com.otto.launcher.trace.data
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import com.otto.launcher.domain.trace.MemoState
 import com.otto.launcher.trace.domain.DailySummary
@@ -25,6 +27,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -42,6 +45,7 @@ class TraceRepository(
     private val v2Dao = database.traceV2Dao()
     private val preferences = TracePreferences(appContext)
     private val mediaStore = TraceMediaStore(appContext)
+    private val transcribingQueue = AtomicBoolean(false)
 
     fun createCameraImageFile(): File = mediaStore.createCameraImageFile()
 
@@ -84,7 +88,8 @@ class TraceRepository(
      */
     suspend fun recordVoiceMemo(
         tempFile: File,
-        transcriber: (suspend (File) -> Result<String>)? = null
+        transcriber: (suspend (File) -> Result<String>)? = null,
+        onTranscript: (suspend (String) -> Unit)? = null
     ) = withContext(Dispatchers.IO) {
         val audio = mediaStore.persistAudio(tempFile)
         val transcript = transcriber
@@ -105,9 +110,55 @@ class TraceRepository(
                 processedAt = if (transcript != null) now else null
             )
         )
+        if (transcript != null) onTranscript?.invoke(transcript)
     }
 
     fun observeQueuedMemoCount(): Flow<Int> = v2Dao.observeVoiceMemoCount(MemoState.QUEUED)
+
+    /**
+     * Transcribes voice memos still QUEUED because they were recorded offline or before a key was
+     * configured. The launcher calls this on resume; it no-ops when offline, when a run is already
+     * in flight, or when the queue is empty, so it is cheap to invoke on every resume. Each memo is
+     * transcribed against its persisted audio (never deleting it); a memo that fails to transcribe
+     * stays QUEUED for the next attempt. Returns how many memos were newly transcribed.
+     */
+    suspend fun transcribeQueuedMemos(
+        transcriber: suspend (File) -> Result<String>,
+        onTranscript: (suspend (String) -> Unit)? = null
+    ): Int = withContext(Dispatchers.IO) {
+        if (!isOnline()) return@withContext 0
+        if (!transcribingQueue.compareAndSet(false, true)) return@withContext 0
+        try {
+            var processed = 0
+            for (memo in v2Dao.voiceMemos(MemoState.QUEUED)) {
+                val transcript = transcriber(File(memo.audioUri))
+                    .getOrNull()
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: continue
+                v2Dao.upsertVoiceMemo(
+                    memo.copy(
+                        state = MemoState.PROCESSED,
+                        transcript = transcript,
+                        processedAt = clock.instant()
+                    )
+                )
+                onTranscript?.invoke(transcript)
+                processed++
+            }
+            processed
+        } finally {
+            transcribingQueue.set(false)
+        }
+    }
+
+    private fun isOnline(): Boolean {
+        val manager = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
 
     suspend fun recordWeight(kilograms: Double) = withContext(Dispatchers.IO) {
         val now = clock.instant()

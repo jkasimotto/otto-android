@@ -71,11 +71,27 @@ class TraceViewModel(application: Application) : AndroidViewModel(application) {
 
     fun recordVoiceMemo(
         tempFile: File,
-        transcriber: (suspend (File) -> Result<String>)? = null
+        transcriber: (suspend (File) -> Result<String>)? = null,
+        onTranscript: (suspend (String) -> Unit)? = null
     ) {
         viewModelScope.launch {
-            repository.recordVoiceMemo(tempFile, transcriber)
+            repository.recordVoiceMemo(tempFile, transcriber, onTranscript)
             refresh()
+        }
+    }
+
+    /**
+     * Drains the offline backlog: transcribes any QUEUED voice memos when a key and connectivity
+     * are available. Safe to call on every launcher resume; the repository no-ops when there is
+     * nothing to do or a run is already in flight.
+     */
+    fun processQueuedMemos(
+        transcriber: suspend (File) -> Result<String>,
+        onTranscript: (suspend (String) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            val processed = repository.transcribeQueuedMemos(transcriber, onTranscript)
+            if (processed > 0) refresh()
         }
     }
 
