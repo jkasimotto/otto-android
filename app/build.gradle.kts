@@ -25,8 +25,8 @@ android {
         applicationId = "com.otto.launcher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 50
-        versionName = "1.49"
+        versionCode = 51
+        versionName = "1.50"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

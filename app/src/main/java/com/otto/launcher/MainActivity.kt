@@ -267,18 +267,15 @@ private fun LauncherScreen(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "dev"
     }
-    val feedbackAgent = remember { FeedbackDetectionAgent() }
     val reminderAgent = remember { ReminderExtractionAgent() }
-    // Runs on every transcribed voice memo and mines it two ways: feedback about Otto itself becomes
-    // a GitHub issue (same path as in-app "Send feedback", raw transcript attached), and any spoken
-    // to-dos become inbox tasks the home screen surfaces for review.
-    val processVoiceTranscript: suspend (String) -> Unit = remember(installedVersionName) {
+    // A transcribed voice memo never leaves the device for GitHub. Transcripts routinely mix personal
+    // talk with feature requests, and an LLM cannot be trusted to decide what is safe to publish to a
+    // PUBLIC repo, so no transcript or model summary is ever posted. Spoken to-dos go only to the
+    // local inbox; app feedback is triaged off-device by reading the transcripts directly (plug the
+    // phone in). The in-app "Send feedback" button stays the only voice-to-GitHub path, and that is
+    // text the user typed and chose to send.
+    val processVoiceTranscript: suspend (String) -> Unit = remember {
         { transcript ->
-            if (FeedbackSubmitter.isConfigured) {
-                feedbackAgent.detect(transcript)?.let { summary ->
-                    FeedbackSubmitter.submitVoiceFeedback(summary, transcript, installedVersionName)
-                }
-            }
             reminderAgent.extract(transcript).forEach { task ->
                 launcherViewModel.saveTask(task)
             }
@@ -2583,13 +2580,6 @@ private object FeedbackSubmitter {
      * included beneath the parsed summary so a reader can check what was actually said, not just the
      * model's interpretation. Behaves like [submit]: same repo, same "feedback" label.
      */
-    suspend fun submitVoiceFeedback(summary: String, transcript: String, versionName: String): Result<Unit> {
-        val trimmedSummary = summary.trim()
-        val title = (trimmedSummary.lineSequence().firstOrNull() ?: "").take(70).ifBlank { "Voice feedback" }
-        val body = "$trimmedSummary\n\n---\nTranscript:\n${transcript.trim()}\n\n---\nSent from Otto v$versionName (voice memo)"
-        return postIssue(title, body)
-    }
-
     private suspend fun postIssue(title: String, body: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val token = OttoConfig.githubFeedbackToken
@@ -2615,94 +2605,6 @@ private object FeedbackSubmitter {
             }
             Unit
         }
-    }
-}
-
-/**
- * Inspects a transcribed voice memo and decides whether the speaker is giving feedback, a bug
- * report, or a feature request about the Otto app itself, as opposed to an unrelated personal note.
- * When it is, returns a concise summary for a GitHub issue; otherwise null. Runs on Groq; any
- * failure or missing key degrades to "no feedback" so a memo is never misfiled as an issue.
- */
-private class FeedbackDetectionAgent {
-    private val client = HttpClientProvider.client
-
-    suspend fun detect(transcript: String): String? = withContext(Dispatchers.IO) {
-        val apiKey = OttoConfig.groqApiKey
-        if (apiKey.isBlank() || transcript.isBlank()) return@withContext null
-
-        val systemPrompt = "You triage transcribed voice memos for Otto, a custom Android home-screen launcher app. Decide whether the memo is feedback, a bug report, or a feature request aimed at the Otto app itself. Ignore unrelated personal notes, reminders, todos, and journal entries. Respond strictly with JSON: {\"is_feedback\": true|false, \"summary\": \"concise feedback in the speaker's voice, empty when not feedback\"}."
-        val userPrompt = "Voice memo transcript:\n\"$transcript\""
-
-        val payload = JSONObject().apply {
-            put("model", FEEDBACK_MODEL)
-            put("temperature", 0.0)
-            // Ask Groq to constrain the output to a JSON object. This makes the response reliably
-            // parseable; the extract/parse below still degrades safely if a model ignores it.
-            put("response_format", JSONObject().put("type", "json_object"))
-            put(
-                "messages",
-                JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "system")
-                        put("content", systemPrompt)
-                    })
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", userPrompt)
-                    })
-                }
-            )
-        }.toString()
-
-        val request = Request.Builder()
-            .url(GROQ_CHAT_URL)
-            .header("Authorization", "Bearer $apiKey")
-            .post(payload.toRequestBody("application/json".toMediaType()))
-            .build()
-
-        runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IOException("Groq feedback triage error ${response.code}")
-                }
-                val body = response.body?.string().orEmpty()
-                val content = runCatching {
-                    JSONObject(body)
-                        .optJSONArray("choices")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("message")
-                        ?.optString("content")
-                        .orEmpty()
-                }.getOrNull().orEmpty()
-                parseFeedback(content, transcript)
-            }
-        }.getOrNull()
-    }
-
-    /**
-     * Extracts the feedback summary from the model's reply. Returns null when the reply is not valid
-     * JSON, when the JSON lacks a true [is_feedback], or when it is not feedback, so a malformed or
-     * negative reply never files an issue. When the model flags feedback but gives an empty summary,
-     * falls back to the raw [transcript] so genuine feedback is not silently dropped.
-     */
-    private fun parseFeedback(content: String, transcript: String): String? {
-        val jsonText = extractJson(content) ?: return null
-        val obj = runCatching { JSONObject(jsonText) }.getOrNull() ?: return null
-        if (!obj.optBoolean("is_feedback", false)) return null
-        return obj.optString("summary").trim().ifBlank { transcript.trim() }
-    }
-
-    /** Pulls the outermost {...} out of a reply, tolerating stray prose or code fences around it. */
-    private fun extractJson(content: String): String? {
-        val start = content.indexOf('{')
-        val end = content.lastIndexOf('}')
-        return if (start >= 0 && end > start) content.substring(start, end + 1) else null
-    }
-
-    companion object {
-        private const val FEEDBACK_MODEL = "llama-3.1-8b-instant"
-        private const val GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
     }
 }
 
