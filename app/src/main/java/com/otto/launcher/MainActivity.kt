@@ -266,14 +266,19 @@ private fun LauncherScreen(
         }.getOrNull() ?: "dev"
     }
     val feedbackAgent = remember { FeedbackDetectionAgent() }
-    // After a voice memo is transcribed, ask Groq whether it is feedback about Otto itself; if so,
-    // file it as a GitHub issue just like in-app "Send feedback", with the raw transcript attached.
-    val routeVoiceFeedback: suspend (String) -> Unit = remember(installedVersionName) {
+    val reminderAgent = remember { ReminderExtractionAgent() }
+    // Runs on every transcribed voice memo and mines it two ways: feedback about Otto itself becomes
+    // a GitHub issue (same path as in-app "Send feedback", raw transcript attached), and any spoken
+    // to-dos become inbox tasks the home screen surfaces for review.
+    val processVoiceTranscript: suspend (String) -> Unit = remember(installedVersionName) {
         { transcript ->
             if (FeedbackSubmitter.isConfigured) {
                 feedbackAgent.detect(transcript)?.let { summary ->
                     FeedbackSubmitter.submitVoiceFeedback(summary, transcript, installedVersionName)
                 }
+            }
+            reminderAgent.extract(transcript).forEach { task ->
+                launcherViewModel.saveTask(task)
             }
         }
     }
@@ -440,7 +445,7 @@ private fun LauncherScreen(
                 if (OttoConfig.hasGroqKey) {
                     traceViewModel.processQueuedMemos(
                         transcriber = { audio -> voiceManager.transcribe(audio, deleteAfter = false) },
-                        onTranscript = routeVoiceFeedback
+                        onTranscript = processVoiceTranscript
                     )
                 }
                 greyscaleEnabled = context.isGreyscaleEnabled()
@@ -554,7 +559,7 @@ private fun LauncherScreen(
             } else {
                 null
             }
-        traceViewModel.recordVoiceMemo(file, transcriber, routeVoiceFeedback)
+        traceViewModel.recordVoiceMemo(file, transcriber, processVoiceTranscript)
         statusMessage = if (transcriber != null) "Note saved." else "Note queued."
     }
 
@@ -922,6 +927,7 @@ private fun LauncherScreen(
                     context.openSystemSettings()
                 },
                 weeklyWeather = weeklyWeather,
+                onOpenInbox = { inboxReviewVisible = true },
                 greyscaleEnabled = greyscaleEnabled,
                 onToggleGreyscale = {
                     if (greyscaleEnabled) {
@@ -2738,6 +2744,86 @@ private class FeedbackDetectionAgent {
 
     companion object {
         private const val FEEDBACK_MODEL = "llama-3.1-8b-instant"
+        private const val GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+    }
+}
+
+/**
+ * Extracts concrete to-dos / reminders spoken in a transcribed voice memo (e.g. "my bike's gears
+ * need fixing" -> "Fix bike gears"). Returns short imperative task strings, empty when the memo has
+ * no actionable items. Runs on Groq in JSON mode; any failure, missing key, or malformed reply
+ * yields an empty list so a memo never becomes bogus tasks.
+ */
+private class ReminderExtractionAgent {
+    private val client = HttpClientProvider.client
+
+    suspend fun extract(transcript: String): List<String> = withContext(Dispatchers.IO) {
+        val apiKey = OttoConfig.groqApiKey
+        if (apiKey.isBlank() || transcript.isBlank()) return@withContext emptyList()
+
+        val systemPrompt = "You extract concrete to-dos and reminders from a transcribed voice memo. Include only actionable tasks the speaker needs to do or remember, such as fixing, buying, or following up on something. Ignore feedback about apps, observations, feelings, and general narration. Respond strictly with JSON: {\"tasks\": [\"short imperative task\"]}. Use an empty array when there are no actionable tasks."
+        val userPrompt = "Voice memo transcript:\n\"$transcript\""
+
+        val payload = JSONObject().apply {
+            put("model", REMINDER_MODEL)
+            put("temperature", 0.0)
+            put("response_format", JSONObject().put("type", "json_object"))
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", userPrompt)
+                    })
+                }
+            )
+        }.toString()
+
+        val request = Request.Builder()
+            .url(GROQ_CHAT_URL)
+            .header("Authorization", "Bearer $apiKey")
+            .post(payload.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Groq reminder extraction error ${response.code}")
+                }
+                val body = response.body?.string().orEmpty()
+                val content = runCatching {
+                    JSONObject(body)
+                        .optJSONArray("choices")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("message")
+                        ?.optString("content")
+                        .orEmpty()
+                }.getOrNull().orEmpty()
+                parseTasks(content)
+            }
+        }.getOrNull().orEmpty()
+    }
+
+    private fun parseTasks(content: String): List<String> {
+        val jsonText = extractJson(content) ?: return emptyList()
+        val obj = runCatching { JSONObject(jsonText) }.getOrNull() ?: return emptyList()
+        val array = obj.optJSONArray("tasks") ?: return emptyList()
+        return (0 until array.length())
+            .mapNotNull { array.optString(it).trim().takeIf { task -> task.isNotEmpty() } }
+    }
+
+    private fun extractJson(content: String): String? {
+        val start = content.indexOf('{')
+        val end = content.lastIndexOf('}')
+        return if (start >= 0 && end > start) content.substring(start, end + 1) else null
+    }
+
+    companion object {
+        private const val REMINDER_MODEL = "llama-3.1-8b-instant"
         private const val GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
     }
 }

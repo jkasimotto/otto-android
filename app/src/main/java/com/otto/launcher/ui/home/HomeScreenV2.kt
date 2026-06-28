@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
@@ -94,6 +95,7 @@ fun HomeScreenV2(
     onWake: () -> Unit,
     onEmergency: () -> Unit,
     weeklyWeather: List<DailyWeather>,
+    onOpenInbox: () -> Unit,
     greyscaleEnabled: Boolean,
     onToggleGreyscale: () -> Unit,
     modifier: Modifier = Modifier
@@ -125,6 +127,9 @@ fun HomeScreenV2(
                     onToggleGreyscale = onToggleGreyscale
                 )
                 if (!isSearching) {
+                    if (state.inbox.isNotEmpty()) {
+                        InboxChip(count = state.inbox.size, onOpen = onOpenInbox)
+                    }
                     val modeHeadline = when (state.mode) {
                         OttoMode.FOCUS -> "Focus mode"
                         OttoMode.WIND_DOWN -> "Wind-down"
@@ -251,6 +256,39 @@ private fun GreyscaleToggle(enabled: Boolean, onToggle: () -> Unit) {
         },
         modifier = Modifier.clickable(onClick = onToggle)
     )
+}
+
+/**
+ * Surfaces the open inbox (notes and voice-extracted to-dos) so reminders are actually seen. The
+ * inbox review screen was previously unreachable; this is its only entry point. Tinted with the
+ * primary colour so an outstanding count catches a fast-scanning eye, then disappears when empty.
+ */
+@Composable
+private fun InboxChip(count: Int, onOpen: () -> Unit) {
+    val label = if (count == 1) "1 note to review" else "$count notes to review"
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable(onClick = onOpen)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "›",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
 }
 
 @Composable
@@ -501,8 +539,10 @@ private fun PhoneUsageWeekChart(usage: List<DailyPhoneUsage>, targetMinutes: Int
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
+            // Fixed Monday..Sunday order so the columns never shift to put today last.
+            val ordered = usage.sortedBy { it.date.dayOfWeek.value }
             // Scale so the target line and the worst day both stay on-chart.
-            val maxMinutes = (usage.maxOf { it.totalMinutes }).coerceAtLeast(targetMinutes * 2)
+            val maxMinutes = (ordered.maxOf { it.totalMinutes }).coerceAtLeast(targetMinutes * 2)
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -510,10 +550,10 @@ private fun PhoneUsageWeekChart(usage: List<DailyPhoneUsage>, targetMinutes: Int
             ) {
                 val w = size.width
                 val h = size.height
-                val slotWidth = w / usage.size
+                val slotWidth = w / ordered.size
                 val barWidth = slotWidth * 0.5f
 
-                usage.forEachIndexed { index, day ->
+                ordered.forEachIndexed { index, day ->
                     val barHeight = (day.totalMinutes.toFloat() / maxMinutes) * h
                     val left = index * slotWidth + (slotWidth - barWidth) / 2f
                     drawRect(
@@ -536,7 +576,7 @@ private fun PhoneUsageWeekChart(usage: List<DailyPhoneUsage>, targetMinutes: Int
                 )
             }
             Row(modifier = Modifier.fillMaxWidth()) {
-                usage.forEach { day ->
+                ordered.forEach { day ->
                     Text(
                         text = day.date.format(DateTimeFormatter.ofPattern("EEEEE")),
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp),
@@ -689,8 +729,9 @@ private fun SleepDayRow(day: WeeklySleepDay, marks: List<Instant>, onTap: () -> 
 
 @Composable
 private fun SleepTimeAxis() {
-    // 7 labels span 12h (8p-8a) out of the 16h window; final 4h (8a-12p) is a trailing spacer.
-    // SpaceBetween over weight(12) + Spacer weight(4) places each label at the correct fraction.
+    // 9 labels every 2h span the full 16h window (8p-12p), so the chart reads as ending at noon
+    // rather than trailing off blank past the old 8a label. SpaceBetween over weight(1f) places each
+    // label at its true fraction, matching the Canvas width in SleepDayRow.
     val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
     val labelStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp)
     Row(
@@ -698,12 +739,11 @@ private fun SleepTimeAxis() {
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Spacer(Modifier.width(42.dp))
-        Row(modifier = Modifier.weight(12f), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("8p", "10p", "12a", "2a", "4a", "6a", "8a").forEach { label ->
+        Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("8p", "10p", "12a", "2a", "4a", "6a", "8a", "10a", "12p").forEach { label ->
                 Text(text = label, style = labelStyle, color = labelColor)
             }
         }
-        Spacer(modifier = Modifier.weight(4f))
         Spacer(Modifier.width(56.dp))
     }
 }
