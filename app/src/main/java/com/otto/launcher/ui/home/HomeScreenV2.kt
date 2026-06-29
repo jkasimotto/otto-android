@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
@@ -53,7 +52,6 @@ import com.otto.launcher.domain.time.TimeCategoryIds
 import com.otto.launcher.domain.time.TimeLedgerCalculator
 import com.otto.launcher.domain.time.displayLabel
 import com.otto.launcher.domain.trace.WeeklySleepDay
-import com.otto.launcher.domain.usage.DailyPhoneUsage
 import com.otto.launcher.domain.weather.DailyWeather
 import java.time.Duration
 import java.time.Instant
@@ -95,7 +93,6 @@ fun HomeScreenV2(
     onWake: () -> Unit,
     onEmergency: () -> Unit,
     weeklyWeather: List<DailyWeather>,
-    onOpenInbox: () -> Unit,
     greyscaleEnabled: Boolean,
     onToggleGreyscale: () -> Unit,
     modifier: Modifier = Modifier
@@ -127,9 +124,6 @@ fun HomeScreenV2(
                     onToggleGreyscale = onToggleGreyscale
                 )
                 if (!isSearching) {
-                    if (state.inbox.isNotEmpty()) {
-                        InboxChip(count = state.inbox.size, onOpen = onOpenInbox)
-                    }
                     val modeHeadline = when (state.mode) {
                         OttoMode.FOCUS -> "Focus mode"
                         OttoMode.WIND_DOWN -> "Wind-down"
@@ -158,7 +152,6 @@ fun HomeScreenV2(
                     }
                     SleepPanel(
                         weeklySleep = state.weeklySleep,
-                        weeklyPhoneUsage = state.weeklyPhoneUsage,
                         weeklyNightUnlocks = state.weeklyNightUnlocks,
                         weeklyWeather = weeklyWeather,
                         onLogSleep = { onLedgerAction(LedgerAction.SLEEP) },
@@ -256,39 +249,6 @@ private fun GreyscaleToggle(enabled: Boolean, onToggle: () -> Unit) {
         },
         modifier = Modifier.clickable(onClick = onToggle)
     )
-}
-
-/**
- * Surfaces the open inbox (notes and voice-extracted to-dos) so reminders are actually seen. The
- * inbox review screen was previously unreachable; this is its only entry point. Tinted with the
- * primary colour so an outstanding count catches a fast-scanning eye, then disappears when empty.
- */
-@Composable
-private fun InboxChip(count: Int, onOpen: () -> Unit) {
-    val label = if (count == 1) "1 note to review" else "$count notes to review"
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-    ) {
-        Row(
-            modifier = Modifier
-                .clickable(onClick = onOpen)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "›",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-    }
 }
 
 @Composable
@@ -431,7 +391,6 @@ fun CommandBar(
 @Composable
 fun SleepPanel(
     weeklySleep: List<WeeklySleepDay>,
-    weeklyPhoneUsage: List<DailyPhoneUsage>,
     weeklyNightUnlocks: Map<LocalDate, List<Instant>>,
     weeklyWeather: List<DailyWeather>,
     onLogSleep: () -> Unit,
@@ -465,7 +424,6 @@ fun SleepPanel(
             }
             SleepTimeAxis()
         }
-        PhoneUsageWeekChart(usage = weeklyPhoneUsage, targetMinutes = 60)
         WeatherWeekRow(weather = weeklyWeather)
     }
 }
@@ -505,90 +463,6 @@ private fun Modifier.grayscale(): Modifier = this.then(
         }
     }
 )
-
-@Composable
-private fun PhoneUsageWeekChart(usage: List<DailyPhoneUsage>, targetMinutes: Int) {
-    val barColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-    val overColor = MaterialTheme.colorScheme.onSurface
-    val targetColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Phone",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "target <1h",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        if (usage.isEmpty()) {
-            // No early return here: returning out of a @Composable content lambda corrupts the slot
-            // table and crashes the launcher on open. Use if/else so the groups always balance.
-            Text(
-                text = "usage access off",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            // Fixed Monday..Sunday order so the columns never shift to put today last.
-            val ordered = usage.sortedBy { it.date.dayOfWeek.value }
-            // Scale so the target line and the worst day both stay on-chart.
-            val maxMinutes = (ordered.maxOf { it.totalMinutes }).coerceAtLeast(targetMinutes * 2)
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-            ) {
-                val w = size.width
-                val h = size.height
-                val slotWidth = w / ordered.size
-                val barWidth = slotWidth * 0.5f
-
-                ordered.forEachIndexed { index, day ->
-                    val barHeight = (day.totalMinutes.toFloat() / maxMinutes) * h
-                    val left = index * slotWidth + (slotWidth - barWidth) / 2f
-                    drawRect(
-                        color = if (day.totalMinutes > targetMinutes) overColor else barColor,
-                        topLeft = androidx.compose.ui.geometry.Offset(left, h - barHeight),
-                        size = androidx.compose.ui.geometry.Size(barWidth, barHeight)
-                    )
-                }
-
-                val targetY = h - (targetMinutes.toFloat() / maxMinutes) * h
-                drawLine(
-                    color = targetColor,
-                    start = androidx.compose.ui.geometry.Offset(0f, targetY),
-                    end = androidx.compose.ui.geometry.Offset(w, targetY),
-                    strokeWidth = 2.dp.toPx(),
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                        floatArrayOf(0f, 6.dp.toPx())
-                    )
-                )
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ordered.forEach { day ->
-                    Text(
-                        text = day.date.format(DateTimeFormatter.ofPattern("EEEEE")),
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp),
-                        color = labelColor,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun SleepDayRow(day: WeeklySleepDay, marks: List<Instant>, onTap: () -> Unit) {

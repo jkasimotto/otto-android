@@ -935,7 +935,6 @@ private fun LauncherScreen(
                     context.openSystemSettings()
                 },
                 weeklyWeather = weeklyWeather,
-                onOpenInbox = { inboxReviewVisible = true },
                 greyscaleEnabled = greyscaleEnabled,
                 onToggleGreyscale = {
                     if (greyscaleEnabled) {
