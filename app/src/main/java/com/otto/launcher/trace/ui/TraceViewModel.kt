@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.otto.launcher.domain.trace.UseCaseCandidate
 import com.otto.launcher.trace.data.TraceRepository
 import com.otto.launcher.trace.domain.DailySummary
 import com.otto.launcher.trace.domain.DataCoverage
@@ -92,6 +93,16 @@ class TraceViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val processed = repository.transcribeQueuedMemos(transcriber, onTranscript)
             if (processed > 0) refresh()
+        }
+    }
+
+    /**
+     * Mines transcribed memos for recurring Otto use cases into local storage. Backfills existing
+     * history on first call, then only handles new memos. Local-only, no UI; safe on every resume.
+     */
+    fun extractUseCases(extractor: suspend (String) -> List<UseCaseCandidate>) {
+        viewModelScope.launch {
+            repository.extractUseCases(extractor)
         }
     }
 

@@ -112,6 +112,7 @@ import com.otto.launcher.domain.time.TimeCategoryIds
 import com.otto.launcher.domain.time.TimeMode
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
+import com.otto.launcher.domain.trace.UseCaseCandidate
 import com.otto.launcher.domain.trace.WeeklySleepDay
 import com.otto.launcher.trace.domain.SleepEstimate
 import java.time.ZoneId
@@ -268,6 +269,7 @@ private fun LauncherScreen(
         }.getOrNull() ?: "dev"
     }
     val reminderAgent = remember { ReminderExtractionAgent() }
+    val useCaseAgent = remember { UseCaseExtractionAgent() }
     // A transcribed voice memo never leaves the device for GitHub. Transcripts routinely mix personal
     // talk with feature requests, and an LLM cannot be trusted to decide what is safe to publish to a
     // PUBLIC repo, so no transcript or model summary is ever posted. Spoken to-dos go only to the
@@ -446,6 +448,12 @@ private fun LauncherScreen(
                         transcriber = { audio -> voiceManager.transcribe(audio, deleteAfter = false) },
                         onTranscript = processVoiceTranscript
                     )
+                    // Mine transcribed memos for recurring Otto use cases into local-only storage.
+                    // Backfills the existing transcript history on first run, then only handles new
+                    // memos; nothing here is ever published. Stays decoupled from capture and from the
+                    // transcription drain above (it reads already-PROCESSED memos), so memos transcribed
+                    // this resume are mined on the next one.
+                    traceViewModel.extractUseCases(useCaseAgent::extract)
                 }
                 greyscaleEnabled = context.isGreyscaleEnabled()
             }
@@ -2683,6 +2691,92 @@ private class ReminderExtractionAgent {
 
     companion object {
         private const val REMINDER_MODEL = "llama-3.1-8b-instant"
+        private const val GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+    }
+}
+
+/**
+ * Pulls candidate Otto "use cases" out of a transcribed memo: durable capabilities the speaker wants
+ * the app to provide and recurring life/work focuses worth reflecting back, as opposed to one-off
+ * to-dos (those go to the inbox via [ReminderExtractionAgent]). Each candidate carries a stable
+ * kebab-case theme slug so that the same idea, mentioned across different memos, collapses to one
+ * theme and its repeat count becomes the signal that it is worth building. Like everything touching a
+ * transcript, this runs and stores entirely on-device; nothing is ever published.
+ */
+private class UseCaseExtractionAgent {
+    private val client = HttpClientProvider.client
+
+    suspend fun extract(transcript: String): List<UseCaseCandidate> = withContext(Dispatchers.IO) {
+        val apiKey = OttoConfig.groqApiKey
+        if (apiKey.isBlank() || transcript.isBlank()) return@withContext emptyList()
+
+        val systemPrompt = "You read a transcribed personal voice memo and extract candidate \"use cases\" for a personal assistant app called Otto. A use case is a durable capability the speaker could want the app to provide, automate, surface, or track, or a recurring life or work focus the app could help reflect back (for example finances, fitness, a relationship, a specific project). Ignore one-off errands and single tasks; those are handled elsewhere. Capture only durable themes and capabilities. For each, give a short canonical description and a stable lowercase kebab-case theme slug; reuse the same slug for the same idea so repeats can be counted. Respond strictly with JSON: {\"useCases\": [{\"theme\": \"kebab-slug\", \"useCase\": \"short description\"}]}. Use an empty array when there are none."
+        val userPrompt = "Voice memo transcript:\n\"$transcript\""
+
+        val payload = JSONObject().apply {
+            put("model", USE_CASE_MODEL)
+            put("temperature", 0.0)
+            put("response_format", JSONObject().put("type", "json_object"))
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", userPrompt)
+                    })
+                }
+            )
+        }.toString()
+
+        val request = Request.Builder()
+            .url(GROQ_CHAT_URL)
+            .header("Authorization", "Bearer $apiKey")
+            .post(payload.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Groq use-case extraction error ${response.code}")
+                }
+                val body = response.body?.string().orEmpty()
+                val content = runCatching {
+                    JSONObject(body)
+                        .optJSONArray("choices")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("message")
+                        ?.optString("content")
+                        .orEmpty()
+                }.getOrNull().orEmpty()
+                parseUseCases(content)
+            }
+        }.getOrNull().orEmpty()
+    }
+
+    private fun parseUseCases(content: String): List<UseCaseCandidate> {
+        val jsonText = extractJson(content) ?: return emptyList()
+        val obj = runCatching { JSONObject(jsonText) }.getOrNull() ?: return emptyList()
+        val array = obj.optJSONArray("useCases") ?: return emptyList()
+        return (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val theme = item.optString("theme").trim()
+            val useCase = item.optString("useCase").trim()
+            if (theme.isEmpty() || useCase.isEmpty()) null else UseCaseCandidate(theme, useCase)
+        }
+    }
+
+    private fun extractJson(content: String): String? {
+        val start = content.indexOf('{')
+        val end = content.lastIndexOf('}')
+        return if (start >= 0 && end > start) content.substring(start, end + 1) else null
+    }
+
+    companion object {
+        private const val USE_CASE_MODEL = "llama-3.1-8b-instant"
         private const val GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
     }
 }

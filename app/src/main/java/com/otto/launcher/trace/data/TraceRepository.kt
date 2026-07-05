@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import com.otto.launcher.domain.trace.MemoState
+import com.otto.launcher.domain.trace.UseCaseCandidate
 import com.otto.launcher.trace.domain.DailySummary
 import com.otto.launcher.trace.domain.DataCoverage
 import com.otto.launcher.trace.domain.MealSlot
@@ -46,6 +47,7 @@ class TraceRepository(
     private val preferences = TracePreferences(appContext)
     private val mediaStore = TraceMediaStore(appContext)
     private val transcribingQueue = AtomicBoolean(false)
+    private val extractingUseCases = AtomicBoolean(false)
 
     fun createCameraImageFile(): File = mediaStore.createCameraImageFile()
 
@@ -149,6 +151,49 @@ class TraceRepository(
             processed
         } finally {
             transcribingQueue.set(false)
+        }
+    }
+
+    /**
+     * Mines transcribed memos for candidate Otto "use cases" (durable capabilities and recurring
+     * focuses, not one-off to-dos) and stores them locally so repeats can be counted later. Runs over
+     * every PROCESSED memo not yet mined, so the first call backfills the existing transcript history
+     * and later calls only handle new memos; each memo is marked once read so the drain never re-bills
+     * Groq for it, even when it yields nothing. Local-only: no transcript or extracted use case ever
+     * leaves the device. No-ops when offline or when a run is already in flight. Returns how many memos
+     * were newly mined. Safe to call on every launcher resume.
+     */
+    suspend fun extractUseCases(
+        extractor: suspend (String) -> List<UseCaseCandidate>
+    ): Int = withContext(Dispatchers.IO) {
+        if (!isOnline()) return@withContext 0
+        if (!extractingUseCases.compareAndSet(false, true)) return@withContext 0
+        try {
+            var processed = 0
+            for (memo in v2Dao.memosNeedingUseCaseExtraction(MemoState.PROCESSED)) {
+                val transcript = memo.transcript?.trim()?.takeIf { it.isNotEmpty() }
+                if (transcript != null) {
+                    for (candidate in extractor(transcript)) {
+                        val theme = candidate.theme.trim().lowercase()
+                        val useCase = candidate.useCase.trim()
+                        if (theme.isEmpty() || useCase.isEmpty()) continue
+                        v2Dao.upsertUseCaseObservation(
+                            UseCaseObservationEntity(
+                                id = UUID.randomUUID().toString(),
+                                theme = theme,
+                                useCase = useCase,
+                                sourceMemoId = memo.id,
+                                createdAt = clock.instant()
+                            )
+                        )
+                    }
+                }
+                v2Dao.markUseCasesProcessed(memo.id, clock.instant())
+                processed++
+            }
+            processed
+        } finally {
+            extractingUseCases.set(false)
         }
     }
 

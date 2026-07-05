@@ -173,7 +173,31 @@ data class VoiceMemoEntity(
     val capturedAt: Instant,
     val state: MemoState,
     val transcript: String?,
-    val processedAt: Instant?
+    val processedAt: Instant?,
+    // Set once the use-case extractor has read this memo's transcript, so the drain never re-bills
+    // Groq for the same memo. Independent of [processedAt] (which marks transcription); a memo can be
+    // transcribed but not yet mined for use cases.
+    val useCasesProcessedAt: Instant? = null
+)
+
+/**
+ * A candidate Otto "use case" mined from a voice memo transcript. Append-only and local-only: one row
+ * per mention, so the count of rows sharing a [theme] is how often the speaker has circled an idea.
+ * Recurrence is derived at read time (GROUP BY theme); nothing here is ever posted off-device.
+ */
+@Entity(
+    tableName = "use_case_observation",
+    indices = [
+        Index("theme"),
+        Index("createdAt")
+    ]
+)
+data class UseCaseObservationEntity(
+    @PrimaryKey val id: String,
+    val theme: String,
+    val useCase: String,
+    val sourceMemoId: String,
+    val createdAt: Instant
 )
 
 @Entity(

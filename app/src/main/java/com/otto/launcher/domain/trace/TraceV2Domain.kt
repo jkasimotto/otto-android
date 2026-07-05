@@ -45,6 +45,18 @@ enum class InboxState {
 }
 
 /**
+ * One candidate Otto "use case" pulled from a voice memo: a durable capability the speaker wants the
+ * app to provide, or a recurring life/work focus worth reflecting back, as opposed to a one-off
+ * to-do (those become inbox TASKs). [theme] is a stable kebab-case slug reused across memos so that
+ * repeats of the same idea can be counted later; that recurrence is the signal that an idea is worth
+ * building. [useCase] is a short canonical description. Stored locally only, never published.
+ */
+data class UseCaseCandidate(
+    val theme: String,
+    val useCase: String
+)
+
+/**
  * Lifecycle of a captured voice memo. Memos are recorded as raw audio and held in the queue
  * (QUEUED) until a later "processing" phase transcribes and folds them into a daily log
  * (PROCESSED), or the user drops one (DISCARDED). Capture and storage only set QUEUED today;

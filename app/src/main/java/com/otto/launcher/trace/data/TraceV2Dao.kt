@@ -230,6 +230,26 @@ interface TraceV2Dao {
     @Query("DELETE FROM voice_memo WHERE id = :id")
     suspend fun deleteVoiceMemo(id: String)
 
+    @Query(
+        """
+        SELECT * FROM voice_memo
+        WHERE state = :state
+          AND transcript IS NOT NULL
+          AND useCasesProcessedAt IS NULL
+        ORDER BY capturedAt ASC
+        """
+    )
+    suspend fun memosNeedingUseCaseExtraction(state: MemoState): List<VoiceMemoEntity>
+
+    @Query("UPDATE voice_memo SET useCasesProcessedAt = :at WHERE id = :id")
+    suspend fun markUseCasesProcessed(id: String, at: Instant)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertUseCaseObservation(observation: UseCaseObservationEntity)
+
+    @Query("SELECT * FROM use_case_observation ORDER BY createdAt DESC")
+    fun observeUseCaseObservations(): Flow<List<UseCaseObservationEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertHealthConnectMapping(mapping: HealthConnectMappingEntity)
 

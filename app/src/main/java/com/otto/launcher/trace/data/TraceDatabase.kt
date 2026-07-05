@@ -45,9 +45,10 @@ import java.time.LocalTime
         TimeBlockEntity::class,
         WellbeingPulseEntity::class,
         AppTimeMappingEntity::class,
-        VoiceMemoEntity::class
+        VoiceMemoEntity::class,
+        UseCaseObservationEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(TraceConverters::class)
@@ -69,6 +70,7 @@ abstract class TraceDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_1_2)
                     .addMigrations(MIGRATION_2_3)
                     .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
@@ -360,6 +362,26 @@ abstract class TraceDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_voice_memo_state` ON `voice_memo` (`state`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_voice_memo_capturedAt` ON `voice_memo` (`capturedAt`)")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `voice_memo` ADD COLUMN `useCasesProcessedAt` INTEGER")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `use_case_observation` (
+                        `id` TEXT NOT NULL,
+                        `theme` TEXT NOT NULL,
+                        `useCase` TEXT NOT NULL,
+                        `sourceMemoId` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_use_case_observation_theme` ON `use_case_observation` (`theme`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_use_case_observation_createdAt` ON `use_case_observation` (`createdAt`)")
             }
         }
     }
