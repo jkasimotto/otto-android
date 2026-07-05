@@ -10,6 +10,10 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import com.otto.launcher.voice.VoiceRecorder
 import com.otto.launcher.voice.isOttoAssistant
 import com.otto.launcher.voice.registerOttoAsAssistant
@@ -151,6 +155,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
@@ -2372,12 +2377,41 @@ private class VoiceTranscriptionManager(private val context: Context) {
 
     fun stopRecording(): File? = recorder.stop()
 
+    /**
+     * Groq rejects uploads above ~25-40MB with a 413. Long memos (e.g. a 30+ minute recording at
+     * 96kbps AAC) silently exceed that and were staying QUEUED forever with no error surfaced and
+     * no retry. Files over [MAX_UPLOAD_BYTES] are split into same-sized chunks before upload and
+     * the per-chunk text is stitched back into one transcript.
+     */
     suspend fun transcribe(file: File, deleteAfter: Boolean = true): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = OttoConfig.groqApiKey
         if (apiKey.isBlank()) {
             return@withContext Result.failure(IllegalStateException("Missing Groq API key."))
         }
 
+        val chunks = if (file.length() > MAX_UPLOAD_BYTES) {
+            runCatching { splitAudioForUpload(file, context.cacheDir, MAX_UPLOAD_BYTES) }
+                .getOrElse { listOf(file) }
+        } else {
+            listOf(file)
+        }
+
+        val result: Result<String> = try {
+            runCatching {
+                val text = chunks.joinToString(" ") { chunk -> uploadChunk(apiKey, chunk).getOrThrow() }.trim()
+                if (text.isBlank()) {
+                    throw IOException("Groq returned an empty transcription.")
+                }
+                text
+            }
+        } finally {
+            if (chunks.size > 1) chunks.forEach { it.delete() }
+        }
+        if (deleteAfter) file.delete()
+        result
+    }
+
+    private fun uploadChunk(apiKey: String, file: File): Result<String> {
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", "whisper-large-v3-turbo")
@@ -2394,21 +2428,15 @@ private class VoiceTranscriptionManager(private val context: Context) {
             .post(body)
             .build()
 
-        val result: Result<String> = runCatching {
+        return runCatching {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IOException("Groq error ${response.code}")
                 }
                 val payload = response.body?.string().orEmpty()
-                val text = JSONObject(payload).optString("text")
-                if (text.isBlank()) {
-                    throw IOException("Groq returned an empty transcription.")
-                }
-                text
+                JSONObject(payload).optString("text")
             }
         }
-        if (deleteAfter) file.delete()
-        result
     }
 
     fun dispose() {
@@ -2418,7 +2446,77 @@ private class VoiceTranscriptionManager(private val context: Context) {
     companion object {
         private const val GROQ_TRANSCRIBE_URL =
             "https://api.groq.com/openai/v1/audio/transcriptions"
+
+        /** Comfortably under Groq's observed 413 cutoff (23.7MB succeeded, 44.5MB failed). */
+        private const val MAX_UPLOAD_BYTES = 20_000_000L
     }
+}
+
+/**
+ * Splits [source] (m4a/AAC) into playable chunks of at most [maxBytesPerChunk] by re-muxing its
+ * existing encoded samples, no re-encoding. AAC frames decode independently, so splitting on a
+ * sample boundary produces valid, separately transcribable audio.
+ */
+private fun splitAudioForUpload(source: File, cacheDir: File, maxBytesPerChunk: Long): List<File> {
+    val extractor = MediaExtractor()
+    extractor.setDataSource(source.absolutePath)
+    val trackIndex = (0 until extractor.trackCount).firstOrNull { i ->
+        extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+    }
+    if (trackIndex == null) {
+        extractor.release()
+        return listOf(source)
+    }
+    extractor.selectTrack(trackIndex)
+    val format = extractor.getTrackFormat(trackIndex)
+    val readBuffer = ByteBuffer.allocate(1 shl 20)
+    val bufferInfo = MediaCodec.BufferInfo()
+
+    val chunks = mutableListOf<File>()
+    var muxer: MediaMuxer? = null
+    var muxerTrack = -1
+    var bytesInChunk = 0L
+    var wroteSample = false
+
+    fun beginChunk() {
+        val chunkFile = File.createTempFile("${source.nameWithoutExtension}_chunk_", ".m4a", cacheDir)
+        muxer = MediaMuxer(chunkFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
+            muxerTrack = addTrack(format)
+            start()
+        }
+        chunks.add(chunkFile)
+        bytesInChunk = 0
+        wroteSample = false
+    }
+
+    fun endChunk() {
+        muxer?.apply {
+            if (wroteSample) stop()
+            release()
+        }
+        if (!wroteSample) chunks.removeLastOrNull()?.delete()
+        muxer = null
+    }
+
+    beginChunk()
+    while (true) {
+        readBuffer.clear()
+        val sampleSize = extractor.readSampleData(readBuffer, 0)
+        if (sampleSize < 0) break
+        bufferInfo.set(0, sampleSize, extractor.sampleTime, extractor.sampleFlags)
+        muxer!!.writeSampleData(muxerTrack, readBuffer, bufferInfo)
+        wroteSample = true
+        bytesInChunk += sampleSize
+        extractor.advance()
+        if (bytesInChunk >= maxBytesPerChunk) {
+            endChunk()
+            beginChunk()
+        }
+    }
+    endChunk()
+    extractor.release()
+
+    return chunks.ifEmpty { listOf(source) }
 }
 
 private fun ComponentActivity.currentVersionName(): String {
