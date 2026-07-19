@@ -244,6 +244,16 @@ interface TraceV2Dao {
     @Query("UPDATE voice_memo SET useCasesProcessedAt = :at WHERE id = :id")
     suspend fun markUseCasesProcessed(id: String, at: Instant)
 
+    @Query(
+        """
+        SELECT * FROM voice_memo
+        WHERE state = :state AND transcript IS NOT NULL
+        ORDER BY capturedAt DESC
+        LIMIT :limit
+        """
+    )
+    fun observeRecentTranscribedMemos(state: MemoState, limit: Int): Flow<List<VoiceMemoEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertUseCaseObservation(observation: UseCaseObservationEntity)
 

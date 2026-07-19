@@ -4,6 +4,7 @@ import android.content.Context
 import com.otto.launcher.domain.goals.GoalSettings
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
+import com.otto.launcher.domain.trace.MemoState
 import com.otto.launcher.domain.trace.TodayLedgerState
 import com.otto.launcher.domain.trace.WeeklySleepDay
 import com.otto.launcher.domain.trace.sleepNightDate
@@ -53,6 +54,10 @@ class TraceV2Repository(
 
     fun observeOpenInbox(): Flow<List<InboxItemEntity>> {
         return dao.observeInboxItems(InboxState.OPEN)
+    }
+
+    fun observeRecentTranscripts(limit: Int = 20): Flow<List<VoiceMemoEntity>> {
+        return dao.observeRecentTranscribedMemos(MemoState.PROCESSED, limit)
     }
 
     fun observeWeeklySleep(): Flow<List<WeeklySleepDay>> {

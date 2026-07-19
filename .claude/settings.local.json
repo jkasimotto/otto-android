@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tailscale status:*)",
+      "Bash(rsync:*)",
+      "Bash(ping:*)",
+      "Bash(tailscale ping:*)",
+      "Bash(tailscale netcheck:*)",
+      "Bash(sudo tailscale up:*)",
+      "Bash(ssh:*)",
+      "Bash(ssh-keyscan:*)",
+      "Bash(~/.ssh/known_hosts)",
+      "Bash(tailscale ssh:*)",
+      "Bash(tailscale file cp:*)",
+      "Bash(find /Users/julianotto/Projects/otto-launcher -name \".gitignore\" -o -name \"*.md\" | xargs cat 2>/dev/null)",
+      "Bash(head:*)"
+    ]
+  }
+}

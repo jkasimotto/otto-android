@@ -131,6 +131,7 @@ import com.otto.launcher.ui.home.LauncherViewModel
 import com.otto.launcher.ui.home.LedgerAction
 import com.otto.launcher.ui.review.FoodReviewScreen
 import com.otto.launcher.ui.review.InboxReviewScreen
+import com.otto.launcher.ui.review.TranscriptViewerScreen
 import com.otto.launcher.ui.review.TodayScreen
 import com.otto.launcher.ui.review.WeekScreen
 import com.otto.launcher.ui.settings.SettingsHome
@@ -316,6 +317,7 @@ private fun LauncherScreen(
     var sleepStartVisible by remember { mutableStateOf(false) }
     var foodReviewVisible by remember { mutableStateOf(false) }
     var inboxReviewVisible by remember { mutableStateOf(false) }
+    var transcriptViewerVisible by remember { mutableStateOf(false) }
     var todayV2Visible by remember { mutableStateOf(false) }
     var weekV2Visible by remember { mutableStateOf(false) }
     var startBlockVisible by remember { mutableStateOf(false) }
@@ -424,6 +426,19 @@ private fun LauncherScreen(
             loadWeather()
         } else {
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -871,6 +886,9 @@ private fun LauncherScreen(
                                     1 -> if (!isVoiceMode) statusMessage = null
                                     2 -> {
                                         handleTracePrimaryAction()
+                                    }
+                                    3 -> {
+                                        transcriptViewerVisible = true
                                     }
                                 }
                                 tapCount = 0
@@ -1511,6 +1529,18 @@ private fun LauncherScreen(
                     items = homeState.inbox,
                     onDismiss = { inboxReviewVisible = false },
                     onState = { id, state -> launcherViewModel.updateInboxState(id, state) }
+                )
+            }
+
+            if (transcriptViewerVisible) {
+                TranscriptViewerScreen(
+                    memos = homeState.recentTranscripts,
+                    onDismiss = { transcriptViewerVisible = false },
+                    onCopy = { memo ->
+                        clipboardManager.setText(AnnotatedString(memo.transcript.orEmpty()))
+                        transcriptViewerVisible = false
+                        statusMessage = "Copied."
+                    }
                 )
             }
 
@@ -2369,7 +2399,7 @@ private fun formatMinutesHuman(minutes: Int): String {
     return "${safe / 60}h %02dm".format(safe % 60)
 }
 
-private class VoiceTranscriptionManager(private val context: Context) {
+internal class VoiceTranscriptionManager(private val context: Context) {
     private val client = HttpClientProvider.client
     private val recorder = VoiceRecorder()
 
@@ -2631,7 +2661,7 @@ private class VoiceLaunchAgent {
     }
 }
 
-private object OttoConfig {
+internal object OttoConfig {
     private const val BUILD_CONFIG_CLASS = "com.otto.launcher.BuildConfig"
     val groqApiKey: String by lazy {
         readBuildConfigField("GROQ_API_KEY") ?: System.getenv("GROQ_API_KEY").orEmpty()

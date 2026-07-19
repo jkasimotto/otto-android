@@ -30,6 +30,7 @@ import com.otto.launcher.domain.usage.DailyPhoneUsage
 import com.otto.launcher.trace.data.FoodEntryEntity
 import com.otto.launcher.trace.data.InboxItemEntity
 import com.otto.launcher.trace.data.TraceV2Repository
+import com.otto.launcher.trace.data.VoiceMemoEntity
 import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -47,6 +48,7 @@ data class HomeUiState(
     val dailyTimeReview: DailyTimeReview,
     val unresolvedFood: List<FoodEntryEntity>,
     val inbox: List<InboxItemEntity>,
+    val recentTranscripts: List<VoiceMemoEntity>,
     val policies: List<AppPolicy>,
     val weeklySleep: List<WeeklySleepDay>,
     val weeklyPhoneUsage: List<DailyPhoneUsage>,
@@ -109,12 +111,16 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             dailyTimeReview = traceAndTimeState.dailyTimeReview,
             unresolvedFood = traceAndTimeState.unresolvedFood,
             inbox = inbox,
+            recentTranscripts = emptyList(),
             policies = policies,
             weeklySleep = weeklySleepDays,
             weeklyPhoneUsage = weeklyPhoneUsageDays,
             weeklyNightUnlocks = nightUnlocks
         )
     }
+        .combine(traceRepository.observeRecentTranscripts()) { state, recentTranscripts ->
+            state.copy(recentTranscripts = recentTranscripts)
+        }
         .catch { emit(emptyState()) }
         .stateIn(
             scope = viewModelScope,
@@ -250,6 +256,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             ),
             unresolvedFood = emptyList(),
             inbox = emptyList(),
+            recentTranscripts = emptyList(),
             policies = emptyList(),
             weeklySleep = emptyList(),
             weeklyPhoneUsage = emptyList()
