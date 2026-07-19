@@ -15,6 +15,14 @@ import com.otto.launcher.domain.time.TimeCategoryKind
 import com.otto.launcher.domain.trace.InboxKind
 import com.otto.launcher.domain.trace.InboxState
 import com.otto.launcher.domain.trace.MemoState
+import com.otto.launcher.quest.data.QuestDao
+import com.otto.launcher.quest.data.QuestEntity
+import com.otto.launcher.quest.data.QuestEventEntity
+import com.otto.launcher.quest.data.QuestStepEntity
+import com.otto.launcher.quest.domain.QuestEventType
+import com.otto.launcher.quest.domain.QuestKind
+import com.otto.launcher.quest.domain.QuestPlace
+import com.otto.launcher.quest.domain.QuestStatus
 import com.otto.launcher.trace.domain.MealSlot
 import com.otto.launcher.trace.domain.TraceConfidence
 import com.otto.launcher.trace.domain.TraceSource
@@ -46,15 +54,19 @@ import java.time.LocalTime
         WellbeingPulseEntity::class,
         AppTimeMappingEntity::class,
         VoiceMemoEntity::class,
-        UseCaseObservationEntity::class
+        UseCaseObservationEntity::class,
+        QuestEntity::class,
+        QuestStepEntity::class,
+        QuestEventEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(TraceConverters::class)
 abstract class TraceDatabase : RoomDatabase() {
     abstract fun traceDao(): TraceDao
     abstract fun traceV2Dao(): TraceV2Dao
+    abstract fun questDao(): QuestDao
 
     companion object {
         @Volatile
@@ -71,6 +83,7 @@ abstract class TraceDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_2_3)
                     .addMigrations(MIGRATION_3_4)
                     .addMigrations(MIGRATION_4_5)
+                    .addMigrations(MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }
@@ -384,6 +397,20 @@ abstract class TraceDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_use_case_observation_createdAt` ON `use_case_observation` (`createdAt`)")
             }
         }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `quest` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `rawText` TEXT NOT NULL, `kind` TEXT NOT NULL, `tiedTo` TEXT, `moneyAmount` TEXT, `deadline` INTEGER, `place` TEXT NOT NULL, `placeNote` TEXT, `effortMinutes` INTEGER, `urgent` INTEGER NOT NULL, `status` TEXT NOT NULL, `suggestedAppsJson` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `lastSurfacedAt` INTEGER, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_quest_status` ON `quest` (`status`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_quest_createdAt` ON `quest` (`createdAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_quest_deadline` ON `quest` (`deadline`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `quest_step` (`id` TEXT NOT NULL, `questId` TEXT NOT NULL, `orderIndex` INTEGER NOT NULL, `text` TEXT NOT NULL, `done` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_quest_step_questId` ON `quest_step` (`questId`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `quest_event` (`id` TEXT NOT NULL, `questId` TEXT NOT NULL, `type` TEXT NOT NULL, `reasonText` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_quest_event_questId` ON `quest_event` (`questId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_quest_event_type` ON `quest_event` (`type`)")
+            }
+        }
     }
 }
 
@@ -471,4 +498,13 @@ class TraceConverters {
 
     @TypeConverter
     fun stringToTimeBlockSource(value: String?): TimeBlockSource? = value?.let(TimeBlockSource::valueOf)
+
+    @TypeConverter fun questKindToString(value: QuestKind?): String? = value?.name
+    @TypeConverter fun stringToQuestKind(value: String?): QuestKind? = value?.let(QuestKind::valueOf)
+    @TypeConverter fun questPlaceToString(value: QuestPlace?): String? = value?.name
+    @TypeConverter fun stringToQuestPlace(value: String?): QuestPlace? = value?.let(QuestPlace::valueOf)
+    @TypeConverter fun questStatusToString(value: QuestStatus?): String? = value?.name
+    @TypeConverter fun stringToQuestStatus(value: String?): QuestStatus? = value?.let(QuestStatus::valueOf)
+    @TypeConverter fun questEventTypeToString(value: QuestEventType?): String? = value?.name
+    @TypeConverter fun stringToQuestEventType(value: String?): QuestEventType? = value?.let(QuestEventType::valueOf)
 }

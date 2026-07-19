@@ -90,6 +90,7 @@ fun HomeScreenV2(
     onAppResult: (AppCommandResult) -> Unit,
     onAppLongPress: (AppCommandResult) -> Unit,
     onOttoLongPress: () -> Unit,
+    onQuest: () -> Unit,
     onWake: () -> Unit,
     onEmergency: () -> Unit,
     weeklyWeather: List<DailyWeather>,
@@ -120,6 +121,7 @@ fun HomeScreenV2(
                 HomeTopBar(
                     state = state,
                     onOttoLongPress = onOttoLongPress,
+                    onQuest = onQuest,
                     greyscaleEnabled = greyscaleEnabled,
                     onToggleGreyscale = onToggleGreyscale
                 )
@@ -201,6 +203,7 @@ fun HomeScreenV2(
 private fun HomeTopBar(
     state: HomeUiState,
     onOttoLongPress: () -> Unit,
+    onQuest: () -> Unit,
     greyscaleEnabled: Boolean,
     onToggleGreyscale: () -> Unit
 ) {
@@ -231,6 +234,12 @@ private fun HomeTopBar(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Text(
+                text = "quest",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable(onClick = onQuest)
+            )
             GreyscaleToggle(enabled = greyscaleEnabled, onToggle = onToggleGreyscale)
             ModeChip(state = state)
         }

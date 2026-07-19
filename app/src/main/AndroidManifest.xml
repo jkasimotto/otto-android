@@ -125,6 +125,16 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:theme="@style/Theme.OttoLauncher" />
+        <activity
+            android:name=".quest.ui.QuestActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.OttoLauncher" />
         <receiver
             android:name=".nag.NagDebugReceiver"
             android:exported="true" />

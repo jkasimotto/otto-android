@@ -4,6 +4,8 @@ import android.app.Application
 import com.otto.launcher.nag.NagNotifier
 import com.otto.launcher.nag.NagPrompt
 import com.otto.launcher.nag.NagScheduler
+import com.otto.launcher.quest.QuestKickoffNotifier
+import com.otto.launcher.quest.QuestKickoffScheduler
 import kotlin.system.exitProcess
 
 class OttoApp : Application() {
@@ -16,6 +18,12 @@ class OttoApp : Application() {
             "Application created; ${OttoDiagnostics.processMarker(this)}"
         )
         armNags()
+        armQuestKickoff()
+    }
+
+    private fun armQuestKickoff() {
+        QuestKickoffNotifier(this).ensureChannel()
+        QuestKickoffScheduler.arm(this)
     }
 
     /** Creates the nag notification channel and schedules the daily asks (idempotent per launch). */

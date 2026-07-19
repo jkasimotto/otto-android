@@ -17,6 +17,7 @@ import android.media.MediaMuxer
 import com.otto.launcher.voice.VoiceRecorder
 import com.otto.launcher.voice.isOttoAssistant
 import com.otto.launcher.voice.registerOttoAsAssistant
+import com.otto.launcher.quest.ui.QuestActivity
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -952,6 +953,7 @@ private fun LauncherScreen(
                     findAppInfo(result)?.let { context.openAppInfo(it) }
                 },
                 onOttoLongPress = { openMaintenance(MaintenanceSection.SETTINGS) },
+                onQuest = { context.startActivity(Intent(context, QuestActivity::class.java)) },
                 onWake = {
                     launcherViewModel.endSleep { minutes ->
                         statusMessage = minutes?.let { "Sleep saved: ${formatMinutesHuman(it)}" } ?: "Sleep saved."
