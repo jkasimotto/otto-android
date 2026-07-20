@@ -1,0 +1,196 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>ComplexCondition:CriticalPeoplePolicyRepair.kt$tier == AppTier.PEOPLE &amp;&amp; !hiddenByDefault &amp;&amp; !suspendedByDefault &amp;&amp; !challengeRequired &amp;&amp; !reasonRequired &amp;&amp; defaultTimeboxMinutes == null &amp;&amp; workWindowJson == null</ID>
+    <ID>ComplexCondition:TimeLedgerRepository.kt$defaultCategoryId == TimeCategoryIds.RELATIONSHIPS &amp;&amp; appTier == AppTier.PEOPLE &amp;&amp; !countAsDigitalDrift &amp;&amp; !requiresIntent</ID>
+    <ID>CyclomaticComplexMethod:CommandParser.kt$CommandParser$fun parse(input: String): OttoCommand?</ID>
+    <ID>CyclomaticComplexMethod:HomeScreenV2.kt$@Composable private fun SleepDayRow(day: WeeklySleepDay, marks: List&lt;Instant&gt;, onTap: () -&gt; Unit)</ID>
+    <ID>CyclomaticComplexMethod:LauncherScreen.kt$@Composable internal fun LauncherScreen( apps: List&lt;AppInfo&gt; )</ID>
+    <ID>CyclomaticComplexMethod:OttoPolicyController.kt$OttoPolicyController$fun applyPolicies(context: Context, force: Boolean = false)</ID>
+    <ID>CyclomaticComplexMethod:PolicyRuntime.kt$PolicyRuntime$suspend fun applyCurrentPolicy( context: Context, clock: Clock = Clock.systemDefaultZone() )</ID>
+    <ID>CyclomaticComplexMethod:TimeLedgerRepository.kt$TimeLedgerRepository$private fun defaultCategoryId(tier: AppTier, app: AppDescriptor): String</ID>
+    <ID>EmptyClassBlock:ReminderExtractionAgent.kt$ReminderExtractionAgent.Companion${ }</ID>
+    <ID>EmptyClassBlock:UseCaseExtractionAgent.kt$UseCaseExtractionAgent.Companion${ }</ID>
+    <ID>FunctionNaming:DistractionGateDialog.kt$@Composable fun DistractionGateDialog( app: AppCommandResult, challengeCode: String, driftText: String?, isOverDriftCap: Boolean, onDismiss: () -&gt; Unit, onOpen: (reason: String, timeboxMinutes: Int) -&gt; Unit )</ID>
+    <ID>FunctionNaming:DistractionGateDialog.kt$@Composable private fun TimeboxButton( minutes: Int, selected: Int, onClick: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:FoodReviewScreen.kt$@Composable fun FoodReviewScreen( entries: List&lt;FoodReviewItem&gt;, onDismiss: () -&gt; Unit, onSetEnergy: (String, Int?) -&gt; Unit )</ID>
+    <ID>FunctionNaming:FoodReviewScreen.kt$@Composable private fun FoodReviewRow( entry: FoodReviewItem, onSetEnergy: (String, Int?) -&gt; Unit )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable fun AppSearchResults( result: CommandResult, onAppResult: (AppCommandResult) -&gt; Unit, onAppLongPress: (AppCommandResult) -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable fun CommandBar( query: String, onQueryChange: (String) -&gt; Unit, onSubmit: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable fun HomeScreenV2( state: HomeUiState, commandResult: CommandResult, query: String, statusMessage: String?, onQueryChange: (String) -&gt; Unit, onSubmitCommand: () -&gt; Unit, onFastCapture: (FastCaptureAction) -&gt; Unit, onFastCaptureLongPress: (FastCaptureAction) -&gt; Unit, onLedgerAction: (LedgerAction) -&gt; Unit, onTapSleepDay: (WeeklySleepDay) -&gt; Unit, onAppResult: (AppCommandResult) -&gt; Unit, onAppLongPress: (AppCommandResult) -&gt; Unit, onOttoLongPress: () -&gt; Unit, onQuest: () -&gt; Unit, onWake: () -&gt; Unit, onEmergency: () -&gt; Unit, weeklyWeather: List&lt;DailyWeather&gt;, greyscaleEnabled: Boolean, onToggleGreyscale: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable fun ModeChip(state: HomeUiState)</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable fun SleepPanel( weeklySleep: List&lt;WeeklySleepDay&gt;, weeklyNightUnlocks: Map&lt;LocalDate, List&lt;Instant&gt;&gt;, weeklyWeather: List&lt;DailyWeather&gt;, onLogSleep: () -&gt; Unit, onTapDay: (WeeklySleepDay) -&gt; Unit )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable fun TodayLedger( state: HomeUiState, onLedgerAction: (LedgerAction) -&gt; Unit )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable private fun GreyscaleToggle(enabled: Boolean, onToggle: () -&gt; Unit)</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable private fun LedgerRow(label: String, value: String, onClick: () -&gt; Unit)</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable private fun SleepDayRow(day: WeeklySleepDay, marks: List&lt;Instant&gt;, onTap: () -&gt; Unit)</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable private fun SleepModeHome( state: HomeUiState, onWake: () -&gt; Unit, onEmergency: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable private fun SleepTimeAxis()</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@Composable private fun WeatherWeekRow(weather: List&lt;DailyWeather&gt;)</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@OptIn(ExperimentalFoundationApi::class) @Composable fun FastCaptureRow( onAction: (FastCaptureAction) -&gt; Unit, onLongPress: (FastCaptureAction) -&gt; Unit )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun AppSearchRow( app: AppCommandResult, onAppResult: (AppCommandResult) -&gt; Unit, onAppLongPress: (AppCommandResult) -&gt; Unit )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun FastCaptureLabel( label: String, action: FastCaptureAction, onAction: (FastCaptureAction) -&gt; Unit, onLongPress: (FastCaptureAction) -&gt; Unit )</ID>
+    <ID>FunctionNaming:HomeScreenV2.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun HomeTopBar( state: HomeUiState, onOttoLongPress: () -&gt; Unit, onQuest: () -&gt; Unit, greyscaleEnabled: Boolean, onToggleGreyscale: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:InboxReviewScreen.kt$@Composable fun InboxReviewScreen( items: List&lt;InboxReviewItem&gt;, onDismiss: () -&gt; Unit, onState: (String, InboxState) -&gt; Unit )</ID>
+    <ID>FunctionNaming:LauncherComponents.kt$@Composable internal fun MinimalSearchField( query: String, onQueryChange: (String) -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:LauncherComponents.kt$@Composable internal fun QuickActionChip( label: String, onClick: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:LauncherComponents.kt$@Composable internal fun QuickActionIcon( greyscaleEnabled: Boolean, onClick: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:LauncherComponents.kt$@Composable internal fun QuickActionRow( modifier: Modifier = Modifier, onOpenSettings: () -&gt; Unit, greyscaleEnabled: Boolean, onToggleGreyscale: () -&gt; Unit, onOpenLogs: () -&gt; Unit, onUpdate: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:LauncherComponents.kt$@Composable internal fun VoiceControlChip( isRecording: Boolean, isTranscribing: Boolean, modifier: Modifier = Modifier, onTap: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:LauncherComponents.kt$@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class) @Composable internal fun AppRow( appInfo: AppInfo, onLaunch: (AppInfo) -&gt; Unit, onLongPress: (AppInfo) -&gt; Unit )</ID>
+    <ID>FunctionNaming:LauncherScreen.kt$@Composable internal fun LauncherScreen( apps: List&lt;AppInfo&gt; )</ID>
+    <ID>FunctionNaming:NoteCaptureSheet.kt$@Composable fun NoteCaptureSheet( onDismiss: () -&gt; Unit, onSaveNote: (String) -&gt; Unit )</ID>
+    <ID>FunctionNaming:ProcessingOverlay.kt$@Composable fun ProcessingOverlay( active: Boolean, label: String, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:ProcessingOverlay.kt$@Composable private fun ProcessingOverlayContent( label: String, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:QuestActivity.kt$@Composable private fun ActiveQuest(s: QuestUiState, record: (VoiceAction) -&gt; Unit, launch: (String) -&gt; Unit)</ID>
+    <ID>FunctionNaming:QuestActivity.kt$@Composable private fun QuestCardView(card: QuestCard, index: Int, pick: (QuestCard) -&gt; Unit)</ID>
+    <ID>FunctionNaming:QuestActivity.kt$@Composable private fun QuestSurface(s: QuestUiState, record: (VoiceAction) -&gt; Unit, pick: (QuestCard) -&gt; Unit, launch: (String) -&gt; Unit)</ID>
+    <ID>FunctionNaming:QuestActivity.kt$@Composable private fun QuestTheme(content: @Composable () -&gt; Unit)</ID>
+    <ID>FunctionNaming:QuestActivity.kt$@Composable private fun VoiceButton(s: QuestUiState, action: VoiceAction, record: (VoiceAction) -&gt; Unit, label: String)</ID>
+    <ID>FunctionNaming:SettingsHome.kt$@Composable fun SettingsHome( section: String, currentVersion: String, lockdownRemaining: String?, onStartLockdown: (Int) -&gt; Unit, onDismiss: () -&gt; Unit, onOpenSystemSettings: () -&gt; Unit, onOpenUsageAccess: () -&gt; Unit, onOpenLogs: () -&gt; Unit, onSendFeedback: () -&gt; Unit, onUpdate: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:SettingsHome.kt$@Composable private fun LockdownControls( lockdownRemaining: String?, pendingMinutes: Int?, onPick: (Int) -&gt; Unit, onCancelPick: () -&gt; Unit, onConfirm: (Int) -&gt; Unit )</ID>
+    <ID>FunctionNaming:SleepStartDialog.kt$@Composable fun SleepStartDialog( onDismiss: () -&gt; Unit, onStartSleep: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:Theme.kt$@Composable fun OttoLauncherTheme(content: @Composable () -&gt; Unit)</ID>
+    <ID>FunctionNaming:TimeLedgerDialogs.kt$@Composable fun StartBlockDialog( onDismiss: () -&gt; Unit, onStartMode: (TimeMode) -&gt; Unit, onStartCategory: (categoryId: String, label: String) -&gt; Unit )</ID>
+    <ID>FunctionNaming:TimeLedgerDialogs.kt$@Composable fun TimeBudgetScreen( today: TodayTimeLedger, week: WeeklyTimeLedger, onDismiss: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TimeLedgerDialogs.kt$@Composable fun TodayTimeReviewScreen( review: DailyTimeReview, onDismiss: () -&gt; Unit, onPulse: (Int) -&gt; Unit )</ID>
+    <ID>FunctionNaming:TimeLedgerDialogs.kt$@Composable fun WeeklyTimeReviewScreen( ledger: WeeklyTimeLedger, onDismiss: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TimeLedgerDialogs.kt$@Composable private fun BlockChoice(label: String, onClick: () -&gt; Unit)</ID>
+    <ID>FunctionNaming:TimeLedgerDialogs.kt$@Composable private fun Metric(label: String, value: String)</ID>
+    <ID>FunctionNaming:TimeLedgerDialogs.kt$@Composable private fun PulseRow(selected: Int?, onPulse: (Int) -&gt; Unit)</ID>
+    <ID>FunctionNaming:TodayScreen.kt$@Composable fun TodayScreen( state: HomeUiState, onDismiss: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TodayScreen.kt$@Composable private fun Metric(label: String, value: String)</ID>
+    <ID>FunctionNaming:TraceCameraOverlay.kt$@Composable fun TraceCameraOverlay( isDrinkOnly: Boolean, createOutputFile: () -&gt; File, onCaptured: (File) -&gt; Unit, onCancel: () -&gt; Unit, onError: (String) -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable fun TraceCaptureSheet( state: TraceDashboardState, onDismiss: () -&gt; Unit, onFoodCamera: () -&gt; Unit, onDrinkCamera: () -&gt; Unit, onImportFood: () -&gt; Unit, onImportDrink: () -&gt; Unit, onConfirmSleep: () -&gt; Unit, onWeight: () -&gt; Unit, onSleep: () -&gt; Unit, onRecordMemo: () -&gt; Unit, queuedMemoCount: Int, onToday: () -&gt; Unit, onSettings: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable fun TraceHomeLayer( state: TraceDashboardState, modifier: Modifier = Modifier, onOpenToday: () -&gt; Unit, onOpenWeekly: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable fun TraceSettingsDialog( state: TraceDashboardState, onDismiss: () -&gt; Unit, onSetCategory: (TraceCategory, Boolean) -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable fun TraceSleepDialog( estimate: SleepEstimate?, title: String = if (estimate != null) "Sleep estimate" else "Sleep", onDismiss: () -&gt; Unit, onSave: (Instant, Instant, Boolean) -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable fun TraceTodayDialog( state: TraceDashboardState, onDismiss: () -&gt; Unit, onHide: (String, Boolean) -&gt; Unit, onDrinkOnly: (String, Boolean) -&gt; Unit, onUpdateNote: (String, String?) -&gt; Unit, onUpdateWeight: (String, Double) -&gt; Unit, onUpdateSleep: (String, Instant, Instant, Boolean) -&gt; Unit, onDelete: (String) -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable fun TraceWeeklyDialog( state: TraceDashboardState, onDismiss: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable fun TraceWeightDialog( lastWeightKg: Double?, onDismiss: () -&gt; Unit, onSave: (Double) -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable private fun CategoryToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -&gt; Unit)</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable private fun TraceActionButton( icon: @Composable () -&gt; Unit, label: String, detail: String?, onClick: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable private fun TraceMetricLine(label: String, value: String)</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable private fun TraceSmallButton( icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable private fun TraceStrip( state: TraceDashboardState, onOpenToday: () -&gt; Unit, onOpenWeekly: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TraceLauncherUi.kt$@Composable private fun TraceTimelineRow( item: TraceTimelineItem, controlsEnabled: Boolean = true, onHide: () -&gt; Unit, onDrinkOnly: () -&gt; Unit, onEditNote: () -&gt; Unit, onEditWeight: () -&gt; Unit, onEditSleep: () -&gt; Unit, onDelete: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:TranscriptViewerScreen.kt$@Composable fun TranscriptViewerScreen( memos: List&lt;TranscriptReviewItem&gt;, onDismiss: () -&gt; Unit, onCopy: (TranscriptReviewItem) -&gt; Unit )</ID>
+    <ID>FunctionNaming:WeekScreen.kt$@Composable fun WeekScreen( state: TraceDashboardState, onDismiss: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:WeekScreen.kt$@Composable private fun Metric(label: String, value: String)</ID>
+    <ID>LargeClass:OttoPolicyController.kt$OttoPolicyController</ID>
+    <ID>LargeClass:TraceRepository.kt$TraceRepository</ID>
+    <ID>LongMethod:DistractionGateDialog.kt$@Composable fun DistractionGateDialog( app: AppCommandResult, challengeCode: String, driftText: String?, isOverDriftCap: Boolean, onDismiss: () -&gt; Unit, onOpen: (reason: String, timeboxMinutes: Int) -&gt; Unit )</ID>
+    <ID>LongMethod:HomeScreenV2.kt$@Composable fun HomeScreenV2( state: HomeUiState, commandResult: CommandResult, query: String, statusMessage: String?, onQueryChange: (String) -&gt; Unit, onSubmitCommand: () -&gt; Unit, onFastCapture: (FastCaptureAction) -&gt; Unit, onFastCaptureLongPress: (FastCaptureAction) -&gt; Unit, onLedgerAction: (LedgerAction) -&gt; Unit, onTapSleepDay: (WeeklySleepDay) -&gt; Unit, onAppResult: (AppCommandResult) -&gt; Unit, onAppLongPress: (AppCommandResult) -&gt; Unit, onOttoLongPress: () -&gt; Unit, onQuest: () -&gt; Unit, onWake: () -&gt; Unit, onEmergency: () -&gt; Unit, weeklyWeather: List&lt;DailyWeather&gt;, greyscaleEnabled: Boolean, onToggleGreyscale: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>LongMethod:HomeScreenV2.kt$@Composable private fun SleepDayRow(day: WeeklySleepDay, marks: List&lt;Instant&gt;, onTap: () -&gt; Unit)</ID>
+    <ID>LongMethod:LauncherScreen.kt$@Composable internal fun LauncherScreen( apps: List&lt;AppInfo&gt; )</ID>
+    <ID>LongMethod:OttoDatabase.kt$OttoDatabase.Companion.&lt;no name provided&gt;$override fun migrate(db: SupportSQLiteDatabase)</ID>
+    <ID>LongMethod:OttoPolicyController.kt$OttoPolicyController$fun applyPolicies(context: Context, force: Boolean = false)</ID>
+    <ID>LongMethod:ProcessingOverlay.kt$@Composable private fun ProcessingOverlayContent( label: String, modifier: Modifier = Modifier )</ID>
+    <ID>LongMethod:TraceCameraOverlay.kt$@Composable fun TraceCameraOverlay( isDrinkOnly: Boolean, createOutputFile: () -&gt; File, onCaptured: (File) -&gt; Unit, onCancel: () -&gt; Unit, onError: (String) -&gt; Unit )</ID>
+    <ID>LongMethod:TraceLauncherUi.kt$@Composable fun TraceTodayDialog( state: TraceDashboardState, onDismiss: () -&gt; Unit, onHide: (String, Boolean) -&gt; Unit, onDrinkOnly: (String, Boolean) -&gt; Unit, onUpdateNote: (String, String?) -&gt; Unit, onUpdateWeight: (String, Double) -&gt; Unit, onUpdateSleep: (String, Instant, Instant, Boolean) -&gt; Unit, onDelete: (String) -&gt; Unit )</ID>
+    <ID>LongMethod:TracePromptPolicyTest.kt$TracePromptPolicyTest$@Test fun nextActionOnlyPromptsForMissingMorningSleep()</ID>
+    <ID>LongParameterList:HomeScreenV2.kt$( state: HomeUiState, commandResult: CommandResult, query: String, statusMessage: String?, onQueryChange: (String) -&gt; Unit, onSubmitCommand: () -&gt; Unit, onFastCapture: (FastCaptureAction) -&gt; Unit, onFastCaptureLongPress: (FastCaptureAction) -&gt; Unit, onLedgerAction: (LedgerAction) -&gt; Unit, onTapSleepDay: (WeeklySleepDay) -&gt; Unit, onAppResult: (AppCommandResult) -&gt; Unit, onAppLongPress: (AppCommandResult) -&gt; Unit, onOttoLongPress: () -&gt; Unit, onQuest: () -&gt; Unit, onWake: () -&gt; Unit, onEmergency: () -&gt; Unit, weeklyWeather: List&lt;DailyWeather&gt;, greyscaleEnabled: Boolean, onToggleGreyscale: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>LongParameterList:SettingsHome.kt$( section: String, currentVersion: String, lockdownRemaining: String?, onStartLockdown: (Int) -&gt; Unit, onDismiss: () -&gt; Unit, onOpenSystemSettings: () -&gt; Unit, onOpenUsageAccess: () -&gt; Unit, onOpenLogs: () -&gt; Unit, onSendFeedback: () -&gt; Unit, onUpdate: () -&gt; Unit )</ID>
+    <ID>LongParameterList:TimeLedgerCalculator.kt$TimeLedgerCalculator$( date: LocalDate, now: Instant, dayStart: Instant, hasUsageAccess: Boolean, categories: List&lt;TimeCategory&gt;, budgets: List&lt;TimeBudget&gt;, blocks: List&lt;TimeBlock&gt;, usage: List&lt;AppUsageSlice&gt;, mappings: List&lt;AppTimeMapping&gt;, sleepMinutes: Int, timeAffluence: Int? )</ID>
+    <ID>LongParameterList:TimeLedgerCalculator.kt$TimeLedgerCalculator$( startDate: LocalDate, endDate: LocalDate, now: Instant, categories: List&lt;TimeCategory&gt;, budgets: List&lt;TimeBudget&gt;, blocks: List&lt;TimeBlock&gt;, usage: List&lt;AppUsageSlice&gt;, mappings: List&lt;AppTimeMapping&gt;, sleepMinutes: Int )</ID>
+    <ID>LongParameterList:TimeLedgerRepository.kt$TimeLedgerRepository$( id: String, categoryId: String, period: BudgetPeriod, floor: Int? = null, target: Int? = null, cap: Int? = null, activeFrom: LocalDate )</ID>
+    <ID>LongParameterList:TraceLauncherUi.kt$( item: TraceTimelineItem, controlsEnabled: Boolean = true, onHide: () -&gt; Unit, onDrinkOnly: () -&gt; Unit, onEditNote: () -&gt; Unit, onEditWeight: () -&gt; Unit, onEditSleep: () -&gt; Unit, onDelete: () -&gt; Unit )</ID>
+    <ID>LongParameterList:TraceLauncherUi.kt$( state: TraceDashboardState, onDismiss: () -&gt; Unit, onFoodCamera: () -&gt; Unit, onDrinkCamera: () -&gt; Unit, onImportFood: () -&gt; Unit, onImportDrink: () -&gt; Unit, onConfirmSleep: () -&gt; Unit, onWeight: () -&gt; Unit, onSleep: () -&gt; Unit, onRecordMemo: () -&gt; Unit, queuedMemoCount: Int, onToday: () -&gt; Unit, onSettings: () -&gt; Unit )</ID>
+    <ID>LongParameterList:TraceLauncherUi.kt$( state: TraceDashboardState, onDismiss: () -&gt; Unit, onHide: (String, Boolean) -&gt; Unit, onDrinkOnly: (String, Boolean) -&gt; Unit, onUpdateNote: (String, String?) -&gt; Unit, onUpdateWeight: (String, Double) -&gt; Unit, onUpdateSleep: (String, Instant, Instant, Boolean) -&gt; Unit, onDelete: (String) -&gt; Unit )</ID>
+    <ID>LoopWithTooManyJumpStatements:OttoPolicyController.kt$OttoPolicyController$for</ID>
+    <ID>NestedBlockDepth:AppActions.kt$internal fun Context.installApk(apkFile: File)</ID>
+    <ID>ReturnCount:AppCatalog.kt$internal fun injectHiddenGatedApps(context: Context, visible: List&lt;AppInfo&gt;): List&lt;AppInfo&gt;</ID>
+    <ID>ReturnCount:AppCatalog.kt$internal fun shouldDisplayApp(packageManager: PackageManager, appInfo: AppInfo): Boolean</ID>
+    <ID>ReturnCount:AppPolicyEngine.kt$AppPolicyEngine$fun shouldShowForQuery(app: AppDescriptor, query: String): Boolean</ID>
+    <ID>ReturnCount:CommandParser.kt$CommandParser$fun parse(input: String): OttoCommand?</ID>
+    <ID>ReturnCount:CommandParser.kt$CommandParser$private fun parseFood(original: String, normalized: String): OttoCommand?</ID>
+    <ID>ReturnCount:CommandParser.kt$CommandParser$private fun parseTextCapture(original: String, normalized: String): OttoCommand?</ID>
+    <ID>ReturnCount:CommandParser.kt$CommandParser$private fun parseTimeDuration(normalized: String): OttoCommand?</ID>
+    <ID>ReturnCount:CommandParser.kt$CommandParser$private fun parseWeight(normalized: String): OttoCommand?</ID>
+    <ID>ReturnCount:CommandResolver.kt$CommandResolver$fun resolve(input: String, apps: List&lt;AppDescriptor&gt;): CommandResult</ID>
+    <ID>ReturnCount:CommandResolver.kt$CommandResolver$private fun levenshteinDistance(a: String, b: String): Int</ID>
+    <ID>ReturnCount:CommandResolver.kt$CommandResolver$private fun scoreApp(app: AppDescriptor, query: String): Int?</ID>
+    <ID>ReturnCount:CriticalPeoplePolicyRepair.kt$internal fun AppPolicyEntity.repairCriticalPeoplePolicy(now: Instant): AppPolicyEntity?</ID>
+    <ID>ReturnCount:FuzzyAppMatcher.kt$private fun levenshteinDistance(a: String, b: String): Int</ID>
+    <ID>ReturnCount:NagSleepRecorder.kt$NagSleepRecorder$private suspend fun extractTimes(transcript: String): Times?</ID>
+    <ID>ReturnCount:NagWorker.kt$NagWorker$override suspend fun doWork(): Result</ID>
+    <ID>ReturnCount:OttoDnsVpnService.kt$OttoDnsPacketProcessor$private fun parseQuestionDomain(query: ByteArray): String?</ID>
+    <ID>ReturnCount:OttoDnsVpnService.kt$OttoDnsPacketProcessor$suspend fun processPacket( packet: ByteArray, length: Int, isBlockedDomain: (String) -&gt; Boolean, forwardQuery: suspend (ByteArray) -&gt; ByteArray? ): ByteArray?</ID>
+    <ID>ReturnCount:OttoDnsVpnService.kt$OttoDnsVpnService$private suspend fun processPackets(tunnel: ParcelFileDescriptor): String</ID>
+    <ID>ReturnCount:OttoDnsVpnService.kt$OttoDnsVpnService$private suspend fun resolveDnsQuery(query: ByteArray): ByteArray?</ID>
+    <ID>ReturnCount:OttoDnsVpnService.kt$OttoWebsitePolicy$fun isBlockedDomain(domain: String, context: Context): Boolean</ID>
+    <ID>ReturnCount:OttoDnsVpnService.kt$OttoWebsitePolicy$private fun isRateLimited(domain: String, context: Context): Boolean</ID>
+    <ID>ReturnCount:OttoPolicyController.kt$OttoPolicyController$fun applyPolicies(context: Context, force: Boolean = false)</ID>
+    <ID>ReturnCount:OttoPolicyController.kt$OttoPolicyController$fun requiresLaunchGateCode(context: Context, packageName: String): Boolean</ID>
+    <ID>ReturnCount:OttoPolicyController.kt$OttoPolicyController$fun syncLockTaskMode(activity: Activity)</ID>
+    <ID>ReturnCount:OttoPolicyController.kt$OttoPolicyController$fun verifyLaunchGateCode( context: Context, packageName: String, attemptedCode: String, expectedCode: String ): Boolean</ID>
+    <ID>ReturnCount:PolicyRepository.kt$private fun parseWindows(value: String?): List&lt;TimeWindow&gt;</ID>
+    <ID>ReturnCount:PolicyRuntime.kt$PolicyRuntime$private fun AppSessionEntity.isStillOpen(clock: Clock): Boolean</ID>
+    <ID>ReturnCount:PolicyRuntime.kt$PolicyRuntime$suspend fun applyCurrentPolicy( context: Context, clock: Clock = Clock.systemDefaultZone() )</ID>
+    <ID>ReturnCount:QuestKickoff.kt$QuestKickoffWorker$override suspend fun doWork(): Result</ID>
+    <ID>ReturnCount:QuickVoiceCaptureActivity.kt$QuickVoiceCaptureActivity$private fun acquireProximityLock()</ID>
+    <ID>ReturnCount:ReminderExtractionAgent.kt$ReminderExtractionAgent$private fun parseTasks(content: String): List&lt;String&gt;</ID>
+    <ID>ReturnCount:SecretNoteStore.kt$SecretNoteStore$fun loadNotes(context: Context, passkey: String): String</ID>
+    <ID>ReturnCount:SecretNoteStore.kt$SecretNoteStore$fun verifyPasskey(context: Context, passkey: String): Boolean</ID>
+    <ID>ReturnCount:TimeLedgerRepository.kt$private fun AppTimeMappingEntity.repairCriticalPeopleMapping(now: Instant): AppTimeMappingEntity?</ID>
+    <ID>ReturnCount:TraceDomain.kt$TraceRules$fun candidateSleepEstimate(previousLauncherSeenAt: Instant?, now: Instant, zoneId: ZoneId): SleepEstimate?</ID>
+    <ID>ReturnCount:TraceDomain.kt$TraceRules$fun weightTrendDeltaKg(weights: List&lt;Pair&lt;Instant, Double&gt;&gt;): Double?</ID>
+    <ID>ReturnCount:TraceMediaStore.kt$TraceMediaStore$private fun writeThumbnail(id: String, source: File): File?</ID>
+    <ID>ReturnCount:TraceRepository.kt$TraceRepository$private fun isOnline(): Boolean</ID>
+    <ID>ReturnCount:UseCaseExtractionAgent.kt$UseCaseExtractionAgent$private fun parseUseCases(content: String): List&lt;UseCaseCandidate&gt;</ID>
+    <ID>ReturnCount:VoiceLaunchAgent.kt$VoiceLaunchAgent$private fun parsePackageFromAgent(content: String, apps: List&lt;AppInfo&gt;): AppInfo?</ID>
+    <ID>ReturnCount:WeatherRepository.kt$WeatherRepository$private fun fetch(latitude: Double, longitude: Double, days: Int): List&lt;DailyWeather&gt;</ID>
+    <ID>ReturnCount:WeatherRepository.kt$WeatherRepository$private fun lastKnownLocation(): Location?</ID>
+    <ID>ThrowsCount:OttoUpdater.kt$OttoUpdater$private fun fetchLatestRelease(): ReleaseInfo</ID>
+    <ID>TooManyFunctions:DeviceOwnerController.kt$DeviceOwnerController</ID>
+    <ID>TooManyFunctions:HomeScreenV2.kt$com.otto.launcher.ui.home.HomeScreenV2.kt</ID>
+    <ID>TooManyFunctions:LauncherViewModel.kt$LauncherViewModel : AndroidViewModel</ID>
+    <ID>TooManyFunctions:OttoDatabase.kt$OttoConverters</ID>
+    <ID>TooManyFunctions:OttoDiagnostics.kt$OttoDiagnostics</ID>
+    <ID>TooManyFunctions:OttoDnsVpnService.kt$OttoDnsVpnService : VpnService</ID>
+    <ID>TooManyFunctions:OttoPolicyController.kt$OttoPolicyController</ID>
+    <ID>TooManyFunctions:QuestActivity.kt$QuestActivity : ComponentActivity</ID>
+    <ID>TooManyFunctions:QuestDao.kt$QuestDao</ID>
+    <ID>TooManyFunctions:QuestRepository.kt$QuestRepository</ID>
+    <ID>TooManyFunctions:QuickVoiceCaptureActivity.kt$QuickVoiceCaptureActivity : ComponentActivity</ID>
+    <ID>TooManyFunctions:TimeLedgerRepository.kt$TimeLedgerRepository</ID>
+    <ID>TooManyFunctions:TraceDao.kt$TraceDao</ID>
+    <ID>TooManyFunctions:TraceLauncherUi.kt$com.otto.launcher.trace.ui.TraceLauncherUi.kt</ID>
+    <ID>TooManyFunctions:TraceMediaStore.kt$TraceMediaStore</ID>
+    <ID>TooManyFunctions:TracePreferences.kt$TracePreferences</ID>
+    <ID>TooManyFunctions:TraceRepository.kt$TraceRepository</ID>
+    <ID>TooManyFunctions:TraceV2Dao.kt$TraceV2Dao</ID>
+    <ID>TooManyFunctions:TraceV2Repository.kt$TraceV2Repository</ID>
+    <ID>TooManyFunctions:TraceViewModel.kt$TraceViewModel : AndroidViewModel</ID>
+    <ID>TooManyFunctions:UsageStatsRepository.kt$UsageStatsRepository</ID>
+    <ID>UnusedParameter:HomeScreenV2.kt$onFastCapture: (FastCaptureAction) -&gt; Unit</ID>
+    <ID>UnusedParameter:HomeScreenV2.kt$onFastCaptureLongPress: (FastCaptureAction) -&gt; Unit</ID>
+    <ID>UnusedPrivateMember:LauncherScreen.kt$private fun handleDoubleTap(apps: List&lt;AppInfo&gt;, onLaunch: (AppInfo) -&gt; Boolean): String</ID>
+    <ID>UnusedPrivateMember:TraceLauncherUi.kt$private fun String.replaceFirstChar(transform: (Char) -&gt; String): String</ID>
+    <ID>UseCheckOrError:GroqClient.kt$GroqClient$throw IllegalStateException("Missing Groq API key.")</ID>
+    <ID>WildcardImport:AppActions.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:FeedbackSubmitter.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:FuzzyAppMatcher.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:GreyscaleController.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:LauncherScreen.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:LauncherScreen.kt$import com.otto.launcher.apps.*</ID>
+    <ID>WildcardImport:LauncherScreen.kt$import com.otto.launcher.guard.*</ID>
+    <ID>WildcardImport:OttoDatabase.kt$import com.otto.launcher.trace.data.*</ID>
+    <ID>WildcardImport:OttoUpdater.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:QuestActivity.kt$import androidx.compose.foundation.layout.*</ID>
+    <ID>WildcardImport:QuestActivity.kt$import androidx.compose.material3.*</ID>
+    <ID>WildcardImport:QuestActivity.kt$import androidx.compose.runtime.*</ID>
+    <ID>WildcardImport:QuestActivity.kt$import com.otto.launcher.quest.data.*</ID>
+    <ID>WildcardImport:QuestActivity.kt$import com.otto.launcher.quest.domain.*</ID>
+    <ID>WildcardImport:QuestActivity.kt$import com.otto.launcher.quest.llm.*</ID>
+    <ID>WildcardImport:QuestKickoff.kt$import androidx.work.*</ID>
+    <ID>WildcardImport:QuestLlm.kt$import com.otto.launcher.quest.domain.*</ID>
+    <ID>WildcardImport:QuestRepository.kt$import com.otto.launcher.quest.domain.*</ID>
+    <ID>WildcardImport:ReminderExtractionAgent.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:SecretNoteStore.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:UseCaseExtractionAgent.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:VoiceLaunchAgent.kt$import com.otto.launcher.*</ID>
+    <ID>WildcardImport:VoiceLaunchAgent.kt$import com.otto.launcher.apps.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

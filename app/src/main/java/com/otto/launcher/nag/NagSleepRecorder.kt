@@ -1,20 +1,13 @@
 package com.otto.launcher.nag
 
 import android.content.Context
-import com.otto.launcher.OttoConfig
+import com.otto.launcher.core.llm.GroqClient
 import com.otto.launcher.trace.data.TraceV2Repository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.util.concurrent.TimeUnit
 
 /**
  * Turns a spoken sleep answer into a real sleep session on the home-screen graph. [NagJudge] only
@@ -24,11 +17,6 @@ import java.util.concurrent.TimeUnit
  * after-midnight bedtime belongs to the night that just ended, so the bar lands on last night's row.
  */
 object NagSleepRecorder {
-    private val client = OkHttpClient.Builder()
-        .callTimeout(30, TimeUnit.SECONDS)
-        .build()
-    private val JSON = "application/json".toMediaType()
-
     /** Extracts the times and records the session. Returns true only if a session was written. */
     suspend fun record(context: Context, transcript: String): Boolean = withContext(Dispatchers.IO) {
         val times = extractTimes(transcript) ?: return@withContext false
@@ -45,45 +33,14 @@ object NagSleepRecorder {
 
     private data class Times(val sleep: LocalTime, val wake: LocalTime)
 
-    private fun extractTimes(transcript: String): Times? {
-        val apiKey = OttoConfig.groqApiKey
-        if (apiKey.isBlank()) return null
-
+    private suspend fun extractTimes(transcript: String): Times? {
         val system = "Extract the bedtime and the wake time from a spoken sleep report. " +
             "Reply ONLY with JSON: {\"sleep\":\"HH:MM\",\"wake\":\"HH:MM\"} using 24-hour local " +
             "clock times. Use null for a field that is not stated."
-        val payload = JSONObject()
-            .put("model", MODEL)
-            .put("temperature", 0)
-            .put("response_format", JSONObject().put("type", "json_object"))
-            .put(
-                "messages",
-                JSONArray()
-                    .put(JSONObject().put("role", "system").put("content", system))
-                    .put(JSONObject().put("role", "user").put("content", transcript)),
-            )
-            .toString()
-
-        val request = Request.Builder()
-            .url(CHAT_URL)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .post(payload.toRequestBody(JSON))
-            .build()
-
-        return runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val content = JSONObject(response.body?.string().orEmpty())
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
-                val parsed = JSONObject(content)
-                val sleep = parseTime(parsed.optString("sleep")) ?: return null
-                val wake = parseTime(parsed.optString("wake")) ?: return null
-                Times(sleep, wake)
-            }
-        }.getOrNull()
+        val parsed = GroqClient.chatJson(system, transcript).getOrNull() ?: return null
+        val sleep = parseTime(parsed.optString("sleep")) ?: return null
+        val wake = parseTime(parsed.optString("wake")) ?: return null
+        return Times(sleep, wake)
     }
 
     private fun parseTime(raw: String?): LocalTime? {
@@ -93,6 +50,4 @@ object NagSleepRecorder {
             .getOrNull()
     }
 
-    private const val MODEL = "llama-3.1-8b-instant"
-    private const val CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 }

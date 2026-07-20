@@ -27,7 +27,7 @@ class TraceV2Repository(
     private val clock: Clock = Clock.systemDefaultZone()
 ) {
     private val appContext = context.applicationContext
-    private val database = TraceDatabase.get(appContext)
+    private val database = com.otto.launcher.core.db.OttoDatabase.get(appContext)
     private val legacyDao = database.traceDao()
     private val dao = database.traceV2Dao()
     private val zoneId: ZoneId = ZoneId.systemDefault()
@@ -305,4 +305,3 @@ class TraceV2Repository(
         return "${safe / 60}h %02dm".format(safe % 60)
     }
 }
-

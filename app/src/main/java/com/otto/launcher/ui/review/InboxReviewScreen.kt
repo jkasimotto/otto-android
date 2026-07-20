@@ -15,11 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.otto.launcher.domain.trace.InboxState
-import com.otto.launcher.trace.data.InboxItemEntity
 
 @Composable
 fun InboxReviewScreen(
-    items: List<InboxItemEntity>,
+    items: List<InboxReviewItem>,
     onDismiss: () -> Unit,
     onState: (String, InboxState) -> Unit
 ) {
@@ -57,4 +56,3 @@ fun InboxReviewScreen(
         }
     )
 }
-

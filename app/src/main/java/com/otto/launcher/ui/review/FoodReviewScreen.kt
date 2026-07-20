@@ -28,12 +28,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.otto.launcher.trace.data.FoodEntryEntity
 import java.time.ZoneId
 
 @Composable
 fun FoodReviewScreen(
-    entries: List<FoodEntryEntity>,
+    entries: List<FoodReviewItem>,
     onDismiss: () -> Unit,
     onSetEnergy: (String, Int?) -> Unit
 ) {
@@ -69,7 +68,7 @@ fun FoodReviewScreen(
 
 @Composable
 private fun FoodReviewRow(
-    entry: FoodEntryEntity,
+    entry: FoodReviewItem,
     onSetEnergy: (String, Int?) -> Unit
 ) {
     var value by rememberSaveable(entry.id) { mutableStateOf(entry.energyKj?.toString().orEmpty()) }
@@ -116,8 +115,7 @@ private fun FoodReviewRow(
     }
 }
 
-private fun formatClock(entry: FoodEntryEntity): String {
+private fun formatClock(entry: FoodReviewItem): String {
     val time = entry.capturedAt.atZone(ZoneId.systemDefault()).toLocalTime()
     return "%02d:%02d".format(time.hour, time.minute)
 }
-

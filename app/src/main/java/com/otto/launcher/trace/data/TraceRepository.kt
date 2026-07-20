@@ -41,7 +41,7 @@ class TraceRepository(
 ) {
     private val appContext = context.applicationContext
     private val zoneId: ZoneId = ZoneId.systemDefault()
-    private val database = TraceDatabase.get(appContext)
+    private val database = com.otto.launcher.core.db.OttoDatabase.get(appContext)
     private val dao = database.traceDao()
     private val v2Dao = database.traceV2Dao()
     private val preferences = TracePreferences(appContext)

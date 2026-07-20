@@ -1,12 +1,13 @@
 package com.otto.launcher.data.policy
 
 import android.content.Context
-import com.otto.launcher.device.DeviceOwnerController
+import com.otto.launcher.guard.DeviceOwnerController
+import com.otto.launcher.guard.OttoPolicyController
 import com.otto.launcher.domain.policy.AppTier
 import com.otto.launcher.domain.time.TimeCategoryIds
 import com.otto.launcher.trace.data.AppPolicyEntity
 import com.otto.launcher.trace.data.AppSessionEntity
-import com.otto.launcher.trace.data.TraceDatabase
+import com.otto.launcher.core.db.OttoDatabase
 import java.time.Clock
 import java.time.Instant
 
@@ -19,9 +20,9 @@ object PolicyRuntime {
         val controller = DeviceOwnerController(appContext)
         if (!controller.isDeviceOwner()) return
         // During a timed lockdown OttoPolicyController owns all package state; don't fight it.
-        if (com.otto.launcher.OttoPolicyController.isLockdownActive(appContext)) return
+        if (OttoPolicyController.isLockdownActive(appContext)) return
 
-        val dao = TraceDatabase.get(appContext).traceV2Dao()
+        val dao = OttoDatabase.get(appContext).traceV2Dao()
         repairCriticalPeoplePolicies(dao.appPolicies(), clock.instant()).takeIf { it.isNotEmpty() }?.let {
             dao.upsertAppPolicies(it)
         }

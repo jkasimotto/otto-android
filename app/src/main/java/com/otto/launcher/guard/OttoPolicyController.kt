@@ -1,7 +1,14 @@
-package com.otto.launcher
+package com.otto.launcher.guard
 
 import android.app.Activity
 import android.app.ActivityManager
+import com.otto.launcher.MainActivity
+import com.otto.launcher.OttoDeviceAdminReceiver
+import com.otto.launcher.OttoDnsVpnService
+import com.otto.launcher.OttoDiagnostics
+import com.otto.launcher.apps.ALLOWED_SYSTEM_PACKAGES
+import com.otto.launcher.apps.invalidateLauncherAppsCache
+import com.otto.launcher.apps.loadLauncherApps
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context

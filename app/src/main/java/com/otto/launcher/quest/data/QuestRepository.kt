@@ -2,13 +2,13 @@ package com.otto.launcher.quest.data
 
 import android.content.Context
 import com.otto.launcher.quest.domain.*
-import com.otto.launcher.trace.data.TraceDatabase
+import com.otto.launcher.core.db.OttoDatabase
 import java.time.Instant
 import java.util.UUID
 import org.json.JSONArray
 
 class QuestRepository(context: Context) {
-    private val dao = TraceDatabase.get(context.applicationContext).questDao()
+    private val dao = OttoDatabase.get(context.applicationContext).questDao()
 
     suspend fun capture(raw: String, classified: com.otto.launcher.quest.llm.ClassifiedQuest): QuestEntity {
         val now = Instant.now()

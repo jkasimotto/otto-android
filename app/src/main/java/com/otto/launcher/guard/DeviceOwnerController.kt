@@ -1,4 +1,4 @@
-package com.otto.launcher.device
+package com.otto.launcher.guard
 
 import android.app.Activity
 import android.app.ActivityManager
@@ -105,4 +105,3 @@ class DeviceOwnerController(private val context: Context) {
         private const val DALTONIZER_SIMULATE_MONOCHROMACY = 0
     }
 }
-

@@ -29,8 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
-import com.otto.launcher.OttoConfig
-import com.otto.launcher.VoiceTranscriptionManager
+import com.otto.launcher.core.config.OttoConfig
+import com.otto.launcher.voice.VoiceTranscriptionManager
 import com.otto.launcher.quest.QuestFocus
 import com.otto.launcher.quest.data.*
 import com.otto.launcher.quest.domain.*

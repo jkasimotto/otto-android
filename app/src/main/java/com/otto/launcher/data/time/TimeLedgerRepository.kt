@@ -24,7 +24,7 @@ import com.otto.launcher.trace.data.AppTimeMappingEntity
 import com.otto.launcher.trace.data.TimeBlockEntity
 import com.otto.launcher.trace.data.TimeBudgetEntity
 import com.otto.launcher.trace.data.TimeCategoryEntity
-import com.otto.launcher.trace.data.TraceDatabase
+import com.otto.launcher.core.db.OttoDatabase
 import com.otto.launcher.trace.data.WellbeingPulseEntity
 import java.time.Clock
 import java.time.DayOfWeek
@@ -43,7 +43,7 @@ class TimeLedgerRepository(
     context: Context,
     private val clock: Clock = Clock.systemDefaultZone()
 ) {
-    private val dao = TraceDatabase.get(context.applicationContext).traceV2Dao()
+    private val dao = OttoDatabase.get(context.applicationContext).traceV2Dao()
     private val zoneId: ZoneId = ZoneId.systemDefault()
 
     fun observeTodayLedger(usage: Flow<UsageTimeSnapshot>): Flow<TodayTimeLedger> {

@@ -16,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.otto.launcher.trace.data.VoiceMemoEntity
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -24,9 +23,9 @@ private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId
 
 @Composable
 fun TranscriptViewerScreen(
-    memos: List<VoiceMemoEntity>,
+    memos: List<TranscriptReviewItem>,
     onDismiss: () -> Unit,
-    onCopy: (VoiceMemoEntity) -> Unit
+    onCopy: (TranscriptReviewItem) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -1,4 +1,4 @@
-package com.otto.launcher.trace.data
+package com.otto.launcher.core.db
 
 import android.content.Context
 import androidx.room.Database
@@ -27,6 +27,7 @@ import com.otto.launcher.trace.domain.MealSlot
 import com.otto.launcher.trace.domain.TraceConfidence
 import com.otto.launcher.trace.domain.TraceSource
 import com.otto.launcher.trace.domain.TraceType
+import com.otto.launcher.trace.data.*
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -62,21 +63,21 @@ import java.time.LocalTime
     version = 6,
     exportSchema = false
 )
-@TypeConverters(TraceConverters::class)
-abstract class TraceDatabase : RoomDatabase() {
+@TypeConverters(OttoConverters::class)
+abstract class OttoDatabase : RoomDatabase() {
     abstract fun traceDao(): TraceDao
     abstract fun traceV2Dao(): TraceV2Dao
     abstract fun questDao(): QuestDao
 
     companion object {
         @Volatile
-        private var instance: TraceDatabase? = null
+        private var instance: OttoDatabase? = null
 
-        fun get(context: Context): TraceDatabase {
+        fun get(context: Context): OttoDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
-                    TraceDatabase::class.java,
+                    OttoDatabase::class.java,
                     "trace.db"
                 )
                     .addMigrations(MIGRATION_1_2)
@@ -414,7 +415,7 @@ abstract class TraceDatabase : RoomDatabase() {
     }
 }
 
-class TraceConverters {
+class OttoConverters {
     @TypeConverter
     fun instantToLong(value: Instant?): Long? = value?.toEpochMilli()
 

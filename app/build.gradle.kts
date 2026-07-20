@@ -4,6 +4,13 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    id("io.gitlab.arturbosch.detekt")
+}
+
+detekt {
+    config.setFrom(rootProject.files("config/detekt.yml"))
+    baseline = rootProject.file("config/detekt-baseline.xml")
+    buildUponDefaultConfig = true
 }
 
 val envProperties = Properties().apply {
@@ -129,4 +136,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.room:room-testing:2.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation("com.lemonappdev:konsist:0.17.3")
+    testImplementation("org.json:json:20240303")
 }

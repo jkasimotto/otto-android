@@ -31,7 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.otto.launcher.VoiceTranscriptionManager
+import com.otto.launcher.voice.VoiceTranscriptionManager
 import com.otto.launcher.trace.data.TraceRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

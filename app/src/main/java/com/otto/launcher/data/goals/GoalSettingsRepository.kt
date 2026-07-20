@@ -3,7 +3,7 @@ package com.otto.launcher.data.goals
 import android.content.Context
 import com.otto.launcher.domain.goals.GoalSettings
 import com.otto.launcher.trace.data.GoalSettingsEntity
-import com.otto.launcher.trace.data.TraceDatabase
+import com.otto.launcher.core.db.OttoDatabase
 import java.time.Clock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -12,7 +12,7 @@ class GoalSettingsRepository(
     context: Context,
     private val clock: Clock = Clock.systemDefaultZone()
 ) {
-    private val dao = TraceDatabase.get(context.applicationContext).traceV2Dao()
+    private val dao = OttoDatabase.get(context.applicationContext).traceV2Dao()
 
     fun observeSettings(): Flow<GoalSettings> {
         return dao.observeGoalSettings(GoalSettingsEntity.DEFAULT_ID)
@@ -54,4 +54,3 @@ private fun GoalSettings.toEntity(clock: Clock): GoalSettingsEntity {
         updatedAt = clock.instant()
     )
 }
-

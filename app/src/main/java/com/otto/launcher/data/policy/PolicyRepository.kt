@@ -12,7 +12,7 @@ import com.otto.launcher.domain.policy.DefaultAppPolicyCatalog
 import com.otto.launcher.domain.policy.TimeWindow
 import com.otto.launcher.trace.data.AppPolicyEntity
 import com.otto.launcher.trace.data.AppSessionEntity
-import com.otto.launcher.trace.data.TraceDatabase
+import com.otto.launcher.core.db.OttoDatabase
 import com.otto.launcher.worker.PolicyRestoreWorker
 import java.time.Clock
 import java.time.DayOfWeek
@@ -28,7 +28,7 @@ class PolicyRepository(
     private val clock: Clock = Clock.systemDefaultZone()
 ) {
     private val appContext = context.applicationContext
-    private val dao = TraceDatabase.get(appContext).traceV2Dao()
+    private val dao = OttoDatabase.get(appContext).traceV2Dao()
 
     fun observePolicies(): Flow<List<AppPolicy>> {
         return dao.observeAppPolicies().map { policies -> policies.map { it.toDomain() } }

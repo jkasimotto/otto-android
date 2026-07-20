@@ -1,9 +1,9 @@
 package com.otto.launcher.quest
 
 import android.content.Context
-import com.otto.launcher.OttoPolicyController
+import com.otto.launcher.guard.OttoPolicyController
 import com.otto.launcher.data.policy.PolicyRepository
-import com.otto.launcher.device.DeviceOwnerController
+import com.otto.launcher.guard.DeviceOwnerController
 import com.otto.launcher.domain.policy.AppTier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

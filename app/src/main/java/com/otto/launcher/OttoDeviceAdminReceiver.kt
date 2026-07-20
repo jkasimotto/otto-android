@@ -3,6 +3,7 @@ package com.otto.launcher
 import android.app.admin.DeviceAdminReceiver
 import android.content.Context
 import android.content.Intent
+import com.otto.launcher.guard.OttoPolicyController
 
 class OttoDeviceAdminReceiver : DeviceAdminReceiver() {
     override fun onEnabled(context: Context, intent: Intent) {
